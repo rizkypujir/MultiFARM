@@ -3,9 +3,8 @@
 /**
  * Verify OnmiFun contracts di LitVM:
  *   - Router  : ada code? cek factory() + WETH() / WzkLTC()
- *   - Factory : cek pair zkLTC/USDC (getPair)
+ *   - Factory : cek pair WzkLTC/token dari factory
  *   - WzkLTC  : ERC20 standard? deposit() works?
- *   - USDC    : ERC20 standard? totalSupply
  *   - Pair    : reserves
  */
 require('dotenv').config();
@@ -40,14 +39,15 @@ async function main() {
 
   // 1. Check code presence
   console.log('1. Contract code check:');
-  for (const [name, addr] of [
+  const codeTargets = [
     ['Router', chain.contracts.onmiFun.router],
     ['Factory', chain.contracts.onmiFun.factory],
     ['Platform', chain.contracts.onmiFun.platform],
     ['WzkLTC', chain.tokens.WzkLTC.address],
-    ['USDC', chain.tokens.USDC.address],
     ['Multicall3', chain.contracts.multicall3],
-  ]) {
+  ].filter(([, addr]) => Boolean(addr));
+
+  for (const [name, addr] of codeTargets) {
     try {
       const code = await provider.getCode(addr);
       if (code === '0x' || code === '0x0') {
@@ -92,21 +92,34 @@ async function main() {
     fail('router.WETH()', e);
   }
 
-  // 3. Factory: getPair WzkLTC/USDC
+  // 3. Factory: scan pair WzkLTC/token
   console.log('');
-  console.log('3. Factory getPair(WzkLTC, USDC):');
-  const FACTORY_ABI = ['function getPair(address, address) view returns (address)'];
+  console.log('3. Factory scan pairs with WzkLTC:');
+  const FACTORY_ABI = [
+    'function allPairsLength() view returns (uint256)',
+    'function allPairs(uint256) view returns (address)',
+  ];
   let pairAddr;
   try {
     const factory = new ethers.Contract(chain.contracts.onmiFun.factory, FACTORY_ABI, provider);
-    pairAddr = await factory.getPair(chain.tokens.WzkLTC.address, chain.tokens.USDC.address);
-    if (pairAddr === ethers.ZeroAddress) {
-      fail('getPair', new Error('pair does not exist (zero address)'));
-    } else {
-      ok('getPair WzkLTC/USDC', pairAddr);
+    const len = Number(await factory.allPairsLength());
+    const PAIR_ABI = ['function token0() view returns (address)', 'function token1() view returns (address)'];
+    for (let i = 0; i < Math.min(len, 50); i++) {
+      const addr = await factory.allPairs(i);
+      const pair = new ethers.Contract(addr, PAIR_ABI, provider);
+      const [t0, t1] = await Promise.all([pair.token0(), pair.token1()]);
+      if (
+        t0.toLowerCase() === chain.tokens.WzkLTC.address.toLowerCase() ||
+        t1.toLowerCase() === chain.tokens.WzkLTC.address.toLowerCase()
+      ) {
+        pairAddr = addr;
+        ok('found WzkLTC pair', `${pairAddr} (index ${i})`);
+        break;
+      }
     }
+    if (!pairAddr) fail('pair scan', new Error('no WzkLTC pair found in first 50 pairs'));
   } catch (e) {
-    fail('getPair', e);
+    fail('pair scan', e);
   }
 
   // 4. Pair reserves
@@ -126,10 +139,10 @@ async function main() {
       const t1 = await pair.token1();
       const totalSupply = await pair.totalSupply();
       const wzlIsToken0 = t0.toLowerCase() === chain.tokens.WzkLTC.address.toLowerCase();
-      console.log(`  token0      : ${t0} ${wzlIsToken0 ? '(WzkLTC)' : '(USDC)'}`);
-      console.log(`  token1      : ${t1} ${wzlIsToken0 ? '(USDC)' : '(WzkLTC)'}`);
-      console.log(`  reserve0    : ${ethers.formatUnits(r0, wzlIsToken0 ? 18 : 6)}`);
-      console.log(`  reserve1    : ${ethers.formatUnits(r1, wzlIsToken0 ? 6 : 18)}`);
+      console.log(`  token0      : ${t0} ${wzlIsToken0 ? '(WzkLTC)' : ''}`);
+      console.log(`  token1      : ${t1} ${wzlIsToken0 ? '' : '(WzkLTC)'}`);
+      console.log(`  reserve0    : ${ethers.formatUnits(r0, 18)}`);
+      console.log(`  reserve1    : ${ethers.formatUnits(r1, 18)}`);
       console.log(`  total LP    : ${ethers.formatUnits(totalSupply, 18)}`);
       console.log(`  last sync   : ${new Date(Number(ts) * 1000).toISOString()}`);
       ok('reserves', '');
@@ -149,7 +162,6 @@ async function main() {
   ];
   for (const [label, t] of [
     ['WzkLTC', chain.tokens.WzkLTC],
-    ['USDC', chain.tokens.USDC],
   ]) {
     try {
       const tok = new ethers.Contract(t.address, ERC20_ABI, provider);
@@ -165,14 +177,18 @@ async function main() {
     }
   }
 
-  // 6. Try getAmountsOut for sanity (1 zkLTC -> USDC)
+  // 6. Try getAmountsOut for sanity (0.01 zkLTC -> paired token)
   console.log('');
-  console.log('6. Quote 0.01 WzkLTC -> USDC (getAmountsOut):');
+  console.log('6. Quote 0.01 WzkLTC -> paired token (getAmountsOut):');
   try {
+    if (!pairAddr) throw new Error('no pair available for quote');
+    const pair = new ethers.Contract(pairAddr, ['function token0() view returns (address)', 'function token1() view returns (address)'], provider);
+    const [t0, t1] = await Promise.all([pair.token0(), pair.token1()]);
+    const outToken = t0.toLowerCase() === chain.tokens.WzkLTC.address.toLowerCase() ? t1 : t0;
     const router = new ethers.Contract(chain.contracts.onmiFun.router, ROUTER_ABI, provider);
-    const path = [chain.tokens.WzkLTC.address, chain.tokens.USDC.address];
+    const path = [chain.tokens.WzkLTC.address, outToken];
     const amounts = await router.getAmountsOut(ethers.parseEther('0.01'), path);
-    console.log(`  in=0.01 WzkLTC -> out=${ethers.formatUnits(amounts[1], 6)} USDC`);
+    console.log(`  in=0.01 WzkLTC -> out=${ethers.formatUnits(amounts[1], 18)} ${outToken.slice(0, 10)}..`);
     ok('quote works', '');
   } catch (e) {
     fail('quote', e);

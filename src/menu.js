@@ -1,14 +1,15 @@
 'use strict';
 require('dotenv').config();
 const chalk = require('chalk');
+const { ethers } = require('ethers');
 const arcChain = require('./chains/arc/config');
 const litvmChain = require('./chains/litvm/config');
 const { loadPrivateKeys } = require('./shared/wallets');
 const { runBalance: runArcBalance } = require('./chains/arc/flows/balance');
 const { runBridge: runArcBridge } = require('./chains/arc/flows/bridge');
 const { runResume: runArcResume } = require('./chains/arc/flows/resume');
-const { runFarmOnce: runArcFarmOnce } = require('./chains/arc/flows/farm');
-const { runFarmOnce: runLitvmFarmOnce, runBalance: runLitvmBalance } = require('./chains/litvm/flows/farm');
+const { runFarmOnce: runArcFarmOnce, SEQUENCE: arcFarmSequence } = require('./chains/arc/flows/farm');
+const { runFarmOnce: runLitvmFarmOnce, runBalance: runLitvmBalance, SEQUENCE: litvmFarmSequence } = require('./chains/litvm/flows/farm');
 const tg = require('./shared/telegram');
 const { sleep } = require('./shared/utils');
 
@@ -18,6 +19,7 @@ const CHAINS = {
     name: 'Arc Testnet',
     config: arcChain,
     runFarmOnce: runArcFarmOnce,
+    taskTotal: arcFarmSequence.length,
     runBalance: runArcBalance,
     runBridge: runArcBridge,
     runResume: runArcResume,
@@ -28,6 +30,7 @@ const CHAINS = {
     name: 'LitVM Testnet',
     config: litvmChain,
     runFarmOnce: runLitvmFarmOnce,
+    taskTotal: litvmFarmSequence.length,
     runBalance: runLitvmBalance,
     runBridge: null,
     runResume: null,
@@ -48,6 +51,66 @@ async function prompts() {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 let dailyState = { running: false, nextAt: null, cycle: 0 };
+
+function nextImmediate() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+const DASHBOARD_FRAMES = ['[|]', '[/]', '[-]', '[\\]'];
+
+function shortChainName(target) {
+  if (target.key === 'arc') return 'Arc';
+  if (target.key === 'litvm') return 'LitVM';
+  return target.chain.name.replace(/\s*Testnet\s*/i, '').trim();
+}
+
+function createParallelDashboard(targets) {
+  const states = new Map(
+    targets.map((target) => [
+      target.key,
+      {
+        label: shortChainName(target),
+        current: 0,
+        total: target.chain.taskTotal || '?',
+        status: 'queued',
+      },
+    ])
+  );
+  let frame = 0;
+  let lastLen = 0;
+  let timer = null;
+
+  const render = (done = false) => {
+    const spin = done ? '[done]' : DASHBOARD_FRAMES[frame++ % DASHBOARD_FRAMES.length];
+    const parts = [...states.values()].map((s) => {
+      const suffix = s.status === 'done' ? ' done' : '';
+      return `${s.label} ${s.current}/${s.total}${suffix}`;
+    });
+    const line = `${spin} ${parts.join('   ')}`;
+    process.stdout.write('\r' + line.padEnd(lastLen));
+    lastLen = Math.max(lastLen, line.length);
+  };
+
+  return {
+    start() {
+      render();
+      timer = setInterval(render, 180);
+    },
+    update(key, progress) {
+      const state = states.get(key);
+      if (!state) return;
+      state.current = progress.current ?? state.current;
+      state.total = progress.total ?? state.total;
+      state.status = progress.status || state.status;
+      render();
+    },
+    stop() {
+      if (timer) clearInterval(timer);
+      render(true);
+      process.stdout.write('\n');
+    },
+  };
+}
 
 function header() {
   console.clear();
@@ -147,6 +210,10 @@ async function menuBridge() {
   const dest = await input({
     message: `Destination address di ${sel.name} (kosongkan = self):`,
     default: '',
+    validate: (v) => {
+      const trimmed = v.trim();
+      return !trimmed || ethers.isAddress(trimmed) || 'Alamat tujuan invalid';
+    },
   });
   const parallel = await confirm({
     message: 'Jalankan semua wallet PARALEL? (lebih cepat, recommended)',
@@ -175,7 +242,11 @@ async function menuResume() {
   });
 
   const pks = loadPrivateKeys();
-  const { ethers } = require('ethers');
+  if (!pks.length) {
+    console.log(chalk.red('Tidak ada wallet. Isi wallets.txt atau PRIVATE_KEYS dulu.'));
+    await pause();
+    return;
+  }
   const choices = pks.map((pk, i) => {
     const addr = new ethers.Wallet(pk.startsWith('0x') ? pk : '0x' + pk).address;
     return { name: `${i + 1}. ${addr}`, value: i };
@@ -226,12 +297,33 @@ async function menuDailyFarm() {
         if (targets.length === 1) {
           await targets[0].chain.runFarmOnce();
         } else {
-          // Run all chains in parallel
-          await Promise.all(
+          const dashboard = createParallelDashboard(targets);
+          dashboard.start();
+          const outcomes = await Promise.all(
             targets.map((t) =>
-              t.chain.runFarmOnce().catch((e) => console.log(chalk.red(`[${t.chain.name}] cycle error: ${e.message}`)))
+              nextImmediate()
+                .then(() =>
+                  t.chain.runFarmOnce({
+                    quiet: true,
+                    onProgress: (progress) => dashboard.update(t.key, progress),
+                  })
+                )
+                .then((result) => ({ target: t, result }))
+                .catch((e) => ({ target: t, error: e }))
             )
           );
+          dashboard.stop();
+          outcomes.forEach(({ target, result, error }) => {
+            if (error) {
+              console.log(chalk.red(`[${target.chain.name}] cycle error: ${error.message}`));
+              return;
+            }
+            const fail = result.totalFail || 0;
+            const mark = fail === 0 ? chalk.green('OK') : chalk.yellow('WARN');
+            console.log(
+              `${mark} ${target.chain.name}: ok=${result.totalOk} fail=${fail} wallets=${result.fullyOk}/${result.total} duration=${result.cycleSecs}s`
+            );
+          });
         }
       } catch (e) {
         console.log(chalk.red('Cycle error: ' + e.message));

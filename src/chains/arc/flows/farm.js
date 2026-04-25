@@ -9,6 +9,7 @@ const { loadWallets } = require('../../../shared/wallets');
 const { shortAddr, randDelay, withRetry } = require('../../../shared/utils');
 const { logFile: rawLogFile } = require('../../../shared/logger');
 const logFile = rawLogFile.withChain('arc');
+const consoleCapture = require('../../../shared/consoleCapture');
 const tg = require('../../../shared/telegram');
 
 // Progress file — supaya cycle yang terputus bisa resume tanpa ulang wallet yang udah selesai.
@@ -83,17 +84,6 @@ const SEQUENCE = [
   { name: 'zkGm', fn: (w) => zk.zkGm(w) },
   { name: `zkCounter×${COUNTER_PER_CYCLE}`, fn: (w) => zk.zkCounterMany(w, COUNTER_PER_CYCLE) },
 ];
-
-// Install sekali di level cycle — parallel-safe. Semua console.log task -> log file.
-function installSilencer() {
-  const orig = { log: console.log, error: console.error };
-  console.log = (...a) => logFile('task', a.map(String).join(' '));
-  console.error = (...a) => logFile('task:err', a.map(String).join(' '));
-  return () => {
-    console.log = orig.log;
-    console.error = orig.error;
-  };
-}
 
 const ERC20_ABI = ['function balanceOf(address) view returns (uint256)'];
 
@@ -180,7 +170,16 @@ async function runWallet(wallet, onTask) {
   return { ok, fail, secs, addr: wallet.address, deadlineHit };
 }
 
-async function runFarmOnce() {
+async function runFarmOnce(options = {}) {
+  const quiet = Boolean(options.quiet);
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+  const emitProgress = (data) => {
+    if (!onProgress) return;
+    try {
+      onProgress({ chain: 'arc', ...data });
+    } catch {}
+  };
+
   const wallets = loadWallets();
   const total = wallets.length;
 
@@ -193,13 +192,17 @@ async function runFarmOnce() {
   // Ambil daftar wallet yang belum diproses
   const pending = wallets.filter((w) => !doneSet.has(w.address.toLowerCase()));
 
-  console.log('');
-  if (prev && doneSet.size > 0) {
-    console.log(chalk.yellow(`Resuming cycle — ${doneSet.size}/${total} wallets already done, ${pending.length} remaining`));
-  } else {
-    console.log(chalk.cyan(`Starting farming cycle — ${total} wallet(s) × ${SEQUENCE.length} tasks  |  batch=${BATCH_SIZE} parallel`));
+  emitProgress({ status: 'starting', current: 0, total: SEQUENCE.length, walletsDone: doneSet.size, walletsTotal: total });
+
+  if (!quiet) {
+    console.log('');
+    if (prev && doneSet.size > 0) {
+      console.log(chalk.yellow(`[Arc] Resuming cycle — ${doneSet.size}/${total} wallets already done, ${pending.length} remaining`));
+    } else {
+      console.log(chalk.cyan(`[Arc] Starting farming cycle — ${total} wallet(s) × ${SEQUENCE.length} tasks  |  batch=${BATCH_SIZE} parallel`));
+    }
+    console.log('');
   }
-  console.log('');
 
   if (tg.isEnabled()) {
     const msg = prev && doneSet.size > 0
@@ -208,9 +211,9 @@ async function runFarmOnce() {
     await tg.sendMessage(msg);
   }
 
-  const spinner = ora({ text: 'starting...' }).start();
-  const restoreConsole = installSilencer();
+  const spinner = quiet ? null : ora({ text: '[Arc] starting...' }).start();
 
+  await consoleCapture.capture('arc', async () => {
   // Save initial progress
   saveProgress({ startedAt: cycleStart, total, done: Array.from(doneSet), results });
 
@@ -225,7 +228,21 @@ async function runFarmOnce() {
     const live = [...liveTasks.entries()]
       .map(([addr, t]) => `${shortAddr(addr)}[${t.taskIdx}/${t.taskTotal}]`)
       .join(' ');
-    spinner.text = `done=${completed}/${total}  pool=${liveTasks.size}/${concurrency}  active: ${live || '-'}`;
+    const activeTasks = [...liveTasks.values()];
+    const current = activeTasks.length
+      ? Math.max(...activeTasks.map((t) => t.taskIdx))
+      : completed >= total ? SEQUENCE.length : 0;
+    emitProgress({
+      status: completed >= total ? 'done' : 'running',
+      current,
+      total: SEQUENCE.length,
+      walletsDone: completed,
+      walletsTotal: total,
+      activeWallets: liveTasks.size,
+    });
+    if (spinner) {
+      spinner.text = `[Arc] done=${completed}/${total}  pool=${liveTasks.size}/${concurrency}  active: ${live || '-'}`;
+    }
   };
 
   const onTask = (info) => {
@@ -263,8 +280,7 @@ async function runFarmOnce() {
   // Spawn N workers paralel, tunggu semua habis
   const workers = Array.from({ length: concurrency }, () => worker());
   await Promise.all(workers);
-
-  restoreConsole();
+  });
 
   const totalOk = results.reduce((a, r) => a + r.ok, 0);
   const totalFail = results.reduce((a, r) => a + r.fail, 0);
@@ -273,25 +289,38 @@ async function runFarmOnce() {
   const cycleSecs = ((Date.now() - cycleStart) / 1000).toFixed(1);
   const fullyOk = results.filter((r) => !r.skipped && r.fail === 0).length;
 
-  spinner.stopAndPersist({
-    symbol: totalFail === 0 ? chalk.green('✔') : chalk.yellow('!'),
-    text: `Cycle done  ${fullyOk}/${active} active wallets fully ok  |  skipped=${skipped}  ok=${totalOk} fail=${totalFail}  |  ${cycleSecs}s`,
+  emitProgress({
+    status: 'done',
+    current: SEQUENCE.length,
+    total: SEQUENCE.length,
+    walletsDone: total,
+    walletsTotal: total,
+    activeWallets: 0,
+    ok: totalOk,
+    fail: totalFail,
   });
 
-  console.log('');
-  results.forEach((r, i) => {
-    const idx = String(i + 1).padStart(2);
-    let mark, line;
-    if (r.skipped) {
-      mark = chalk.gray('○');
-      line = `  ${mark} ${idx}  ${shortAddr(r.addr)}  ${chalk.gray(`SKIPPED (USDC=${r.balance} < ${MIN_USDC_FARM})`)}`;
-    } else {
-      mark = r.fail === 0 ? chalk.green('✔') : chalk.yellow('!');
-      line = `  ${mark} ${idx}  ${shortAddr(r.addr)}  ok=${r.ok} fail=${r.fail}  (${r.secs}s)`;
-    }
-    console.log(line);
-  });
-  console.log('');
+  if (!quiet) {
+    spinner.stopAndPersist({
+      symbol: totalFail === 0 ? chalk.green('✔') : chalk.yellow('!'),
+      text: `[Arc] cycle done  ${fullyOk}/${active} active wallets fully ok  |  skipped=${skipped}  ok=${totalOk} fail=${totalFail}  |  ${cycleSecs}s`,
+    });
+
+    console.log('');
+    results.forEach((r, i) => {
+      const idx = String(i + 1).padStart(2);
+      let mark, line;
+      if (r.skipped) {
+        mark = chalk.gray('○');
+        line = `  ${mark} ${idx}  ${shortAddr(r.addr)}  ${chalk.gray(`SKIPPED (USDC=${r.balance} < ${MIN_USDC_FARM})`)}`;
+      } else {
+        mark = r.fail === 0 ? chalk.green('✔') : chalk.yellow('!');
+        line = `  ${mark} ${idx}  ${shortAddr(r.addr)}  ok=${r.ok} fail=${r.fail}  (${r.secs}s)`;
+      }
+      console.log(line);
+    });
+    console.log('');
+  }
 
   if (tg.isEnabled()) {
     await tg.sendMessage(

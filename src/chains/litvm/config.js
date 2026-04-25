@@ -20,12 +20,6 @@ const config = {
       decimals: 18,
       symbol: 'WzkLTC',
     },
-    // USDC stable token (verified from OnmiFun bundle)
-    USDC: {
-      address: '0x76f7747568e7c5c110230ab4e45af90cffcc0753',
-      decimals: 6,
-      symbol: 'USDC',
-    },
   },
   // Contract addresses untuk dApps di LitVM
   contracts: {
@@ -33,7 +27,7 @@ const config = {
     onmiFun: {
       factory: '0x9ec0eFf74A188B33C29c31849e6D37CbA6E0F586',
       router: '0xe351c47c3b96844F46e9808a7D5bBa8101BfFB57',
-      platform: '0x174F8a75F9acf9c2DBb4aD20482Ab4bC4c41828C', // bonding curve
+      platform: null, // bonding curve address not used by current menu tasks
       initCodeHash: '0x8f3e81720db33e14925a307158d291bb5d812d5cb6c34e54ecf0b33c126eab3f',
     },
     multicall3: '0xFd7e84304f83e4352a200F487b1cFF949e3e9755',

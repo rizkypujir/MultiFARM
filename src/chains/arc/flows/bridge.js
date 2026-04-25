@@ -6,6 +6,7 @@ const { bridgeOne } = require('../bridge/cctp');
 const { shortAddr } = require('../../../shared/utils');
 const { logFile: rawLogFile } = require('../../../shared/logger');
 const logFile = rawLogFile.withChain('arc');
+const consoleCapture = require('../../../shared/consoleCapture');
 const tg = require('../../../shared/telegram');
 
 async function runBridge({ amountUsdc, destAddress, parallel = true }) {
@@ -42,22 +43,17 @@ async function runBridge({ amountUsdc, destAddress, parallel = true }) {
   async function doOne(i) {
     const pk = pks[i];
     state[i] = 'running';
-    const origLog = console.log;
-    const silent = (...args) => logFile('bridge', args.map(String).join(' '));
-    if (!parallel) console.log = silent;
-    try {
-      // Saat parallel: biarkan console.log bocor tapi akan overlap—lebih aman redirect juga.
-      if (parallel) console.log = silent;
-      const { burnHash, mintHash } = await bridgeOne(pk, amountUsdc, destAddress || null);
-      results[i] = { ok: true, addr: addrs[i], burnHash, mintHash };
-      state[i] = 'ok';
-    } catch (e) {
-      results[i] = { ok: false, addr: addrs[i], error: e.shortMessage || e.message };
-      state[i] = 'fail';
-      logFile('bridge', `ERR ${addrs[i]}: ${e.message}`);
-    } finally {
-      console.log = origLog;
-    }
+    await consoleCapture.capture('arc', 'bridge', async () => {
+      try {
+        const { burnHash, mintHash } = await bridgeOne(pk, amountUsdc, destAddress || null);
+        results[i] = { ok: true, addr: addrs[i], burnHash, mintHash };
+        state[i] = 'ok';
+      } catch (e) {
+        results[i] = { ok: false, addr: addrs[i], error: e.shortMessage || e.message };
+        state[i] = 'fail';
+        logFile('bridge', `ERR ${addrs[i]}: ${e.message}`);
+      }
+    });
   }
 
   if (parallel) {

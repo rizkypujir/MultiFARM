@@ -10,6 +10,7 @@ const { getProvider } = require('../provider');
 const { shortAddr, randDelay, withRetry } = require('../../../shared/utils');
 const { logFile: rawLogFile } = require('../../../shared/logger');
 const logFile = rawLogFile.withChain('litvm');
+const consoleCapture = require('../../../shared/consoleCapture');
 const tg = require('../../../shared/telegram');
 
 // Tasks
@@ -144,16 +145,6 @@ const SEQUENCE = [
   ...(INCLUDE_LESTER ? [{ name: 'lesterCreateToken', fn: (w) => lester.lesterCreateToken(w) }] : []),
 ];
 
-function installSilencer() {
-  const orig = { log: console.log, error: console.error };
-  console.log = (...a) => logFile('task', a.map(String).join(' '));
-  console.error = (...a) => logFile('task:err', a.map(String).join(' '));
-  return () => {
-    console.log = orig.log;
-    console.error = orig.error;
-  };
-}
-
 async function checkWalletFunded(wallet) {
   try {
     const bal = await wallet.provider.getBalance(wallet.address);
@@ -208,7 +199,16 @@ async function runWallet(wallet, onTask) {
   return { ok, fail, secs, addr: wallet.address, deadlineHit };
 }
 
-async function runFarmOnce() {
+async function runFarmOnce(options = {}) {
+  const quiet = Boolean(options.quiet);
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+  const emitProgress = (data) => {
+    if (!onProgress) return;
+    try {
+      onProgress({ chain: 'litvm', ...data });
+    } catch {}
+  };
+
   const wallets = loadLitvmWallets();
   const total = wallets.length;
 
@@ -219,13 +219,17 @@ async function runFarmOnce() {
 
   const pending = wallets.filter((w) => !doneSet.has(w.address.toLowerCase()));
 
-  console.log('');
-  if (prev && doneSet.size > 0) {
-    console.log(chalk.yellow(`[LitVM] Resuming cycle — ${doneSet.size}/${total} done, ${pending.length} remaining`));
-  } else {
-    console.log(chalk.cyan(`[LitVM] Starting cycle — ${total} wallet(s) × ${SEQUENCE.length} tasks  |  batch=${BATCH_SIZE}`));
+  emitProgress({ status: 'starting', current: 0, total: SEQUENCE.length, walletsDone: doneSet.size, walletsTotal: total });
+
+  if (!quiet) {
+    console.log('');
+    if (prev && doneSet.size > 0) {
+      console.log(chalk.yellow(`[LitVM] Resuming cycle — ${doneSet.size}/${total} done, ${pending.length} remaining`));
+    } else {
+      console.log(chalk.cyan(`[LitVM] Starting cycle — ${total} wallet(s) × ${SEQUENCE.length} tasks  |  batch=${BATCH_SIZE}`));
+    }
+    console.log('');
   }
-  console.log('');
 
   if (tg.isEnabled()) {
     const msg = prev && doneSet.size > 0
@@ -234,9 +238,9 @@ async function runFarmOnce() {
     await tg.sendMessage(msg);
   }
 
-  const spinner = ora({ text: '[LitVM] starting...' }).start();
-  const restoreConsole = installSilencer();
+  const spinner = quiet ? null : ora({ text: '[LitVM] starting...' }).start();
 
+  await consoleCapture.capture('litvm', async () => {
   saveProgress({ startedAt: cycleStart, total, done: Array.from(doneSet), results });
 
   const liveTasks = new Map();
@@ -248,7 +252,21 @@ async function runFarmOnce() {
     const live = [...liveTasks.entries()]
       .map(([addr, t]) => `${shortAddr(addr)}[${t.taskIdx}/${t.taskTotal}]`)
       .join(' ');
-    spinner.text = `[LitVM] done=${completed}/${total}  pool=${liveTasks.size}/${concurrency}  active: ${live || '-'}`;
+    const activeTasks = [...liveTasks.values()];
+    const current = activeTasks.length
+      ? Math.max(...activeTasks.map((t) => t.taskIdx))
+      : completed >= total ? SEQUENCE.length : 0;
+    emitProgress({
+      status: completed >= total ? 'done' : 'running',
+      current,
+      total: SEQUENCE.length,
+      walletsDone: completed,
+      walletsTotal: total,
+      activeWallets: liveTasks.size,
+    });
+    if (spinner) {
+      spinner.text = `[LitVM] done=${completed}/${total}  pool=${liveTasks.size}/${concurrency}  active: ${live || '-'}`;
+    }
   };
 
   const onTask = (info) => {
@@ -283,8 +301,7 @@ async function runFarmOnce() {
 
   const workers = Array.from({ length: concurrency || 1 }, () => worker());
   await Promise.all(workers);
-
-  restoreConsole();
+  });
 
   const totalOk = results.reduce((a, r) => a + r.ok, 0);
   const totalFail = results.reduce((a, r) => a + r.fail, 0);
@@ -293,25 +310,38 @@ async function runFarmOnce() {
   const cycleSecs = ((Date.now() - cycleStart) / 1000).toFixed(1);
   const fullyOk = results.filter((r) => !r.skipped && r.fail === 0).length;
 
-  spinner.stopAndPersist({
-    symbol: totalFail === 0 ? chalk.green('✔') : chalk.yellow('!'),
-    text: `[LitVM] cycle done  ${fullyOk}/${active} fully ok  |  skipped=${skipped}  ok=${totalOk} fail=${totalFail}  |  ${cycleSecs}s`,
+  emitProgress({
+    status: 'done',
+    current: SEQUENCE.length,
+    total: SEQUENCE.length,
+    walletsDone: total,
+    walletsTotal: total,
+    activeWallets: 0,
+    ok: totalOk,
+    fail: totalFail,
   });
 
-  console.log('');
-  results.forEach((r, i) => {
-    const idx = String(i + 1).padStart(2);
-    let mark, line;
-    if (r.skipped) {
-      mark = chalk.gray('○');
-      line = `  ${mark} ${idx}  ${shortAddr(r.addr)}  ${chalk.gray(`SKIPPED (zkLTC=${r.balance} < ${MIN_ZKLTC_FARM})`)}`;
-    } else {
-      mark = r.fail === 0 ? chalk.green('✔') : chalk.yellow('!');
-      line = `  ${mark} ${idx}  ${shortAddr(r.addr)}  ok=${r.ok} fail=${r.fail}  (${r.secs}s)`;
-    }
-    console.log(line);
-  });
-  console.log('');
+  if (!quiet) {
+    spinner.stopAndPersist({
+      symbol: totalFail === 0 ? chalk.green('✔') : chalk.yellow('!'),
+      text: `[LitVM] cycle done  ${fullyOk}/${active} fully ok  |  skipped=${skipped}  ok=${totalOk} fail=${totalFail}  |  ${cycleSecs}s`,
+    });
+
+    console.log('');
+    results.forEach((r, i) => {
+      const idx = String(i + 1).padStart(2);
+      let mark, line;
+      if (r.skipped) {
+        mark = chalk.gray('○');
+        line = `  ${mark} ${idx}  ${shortAddr(r.addr)}  ${chalk.gray(`SKIPPED (zkLTC=${r.balance} < ${MIN_ZKLTC_FARM})`)}`;
+      } else {
+        mark = r.fail === 0 ? chalk.green('✔') : chalk.yellow('!');
+        line = `  ${mark} ${idx}  ${shortAddr(r.addr)}  ok=${r.ok} fail=${r.fail}  (${r.secs}s)`;
+      }
+      console.log(line);
+    });
+    console.log('');
+  }
 
   if (tg.isEnabled()) {
     await tg.sendMessage(
@@ -327,13 +357,12 @@ async function runFarmOnce() {
   return { totalOk, totalFail, fullyOk, total, cycleSecs };
 }
 
-// Balance check: native zkLTC + WzkLTC + USDC
+// Balance check: native zkLTC + WzkLTC
 async function runBalance() {
   const wallets = loadLitvmWallets();
   const provider = getProvider();
   const ERC20 = ['function balanceOf(address) view returns (uint256)'];
   const wzl = new ethers.Contract(chain.tokens.WzkLTC.address, ERC20, provider);
-  const usdc = new ethers.Contract(chain.tokens.USDC.address, ERC20, provider).balanceOf;
 
   const spinner = ora(`[LitVM] checking ${wallets.length} wallets...`).start();
   const rows = [];
