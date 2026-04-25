@@ -10,7 +10,9 @@ const fs = require('fs');
 const path = require('path');
 const { ethers } = require('ethers');
 
-const chain = require('../config/chain');
+// Default ke Arc, override pakai --chain litvm
+const chainArg = process.argv.includes('--chain') ? process.argv[process.argv.indexOf('--chain') + 1] : 'arc';
+const chain = require(`../src/chains/${chainArg}/config`);
 
 async function main() {
   const arg = (process.argv[2] || '').toLowerCase();
@@ -52,22 +54,29 @@ async function main() {
   target = ethers.getAddress(target);
   const erc20 = ['function balanceOf(address) view returns (uint256)'];
 
-  const [native, latNonce, penNonce, usdcBal, eurcBal] = await Promise.all([
+  const baseQueries = [
     p.getBalance(target),
     p.getTransactionCount(target, 'latest'),
     p.getTransactionCount(target, 'pending'),
-    new ethers.Contract(chain.tokens.USDC.address, erc20, p).balanceOf(target),
-    new ethers.Contract(chain.tokens.EURC.address, erc20, p).balanceOf(target),
-  ]);
-
+  ];
+  const tokenEntries = Object.entries(chain.tokens || {});
+  const tokenQueries = tokenEntries.map(([, t]) =>
+    new ethers.Contract(t.address, erc20, p).balanceOf(target).catch(() => 0n)
+  );
+  const results = await Promise.all([...baseQueries, ...tokenQueries]);
+  const native = results[0];
+  const latNonce = results[1];
+  const penNonce = results[2];
+  const tokenBalances = results.slice(3);
   const stuck = penNonce - latNonce;
 
   console.log('');
-  console.log('═══ Wallet diagnostic ═══');
+  console.log(`═══ Wallet diagnostic — ${chain.name || chainArg} ═══`);
   console.log(`address     : ${target}`);
-  console.log(`native bal  : ${ethers.formatEther(native)} (USDC, 18dec view)`);
-  console.log(`USDC bal    : ${ethers.formatUnits(usdcBal, 6)} (ERC20, 6dec view)`);
-  console.log(`EURC bal    : ${ethers.formatUnits(eurcBal, 6)}`);
+  console.log(`native bal  : ${ethers.formatEther(native)} (${chain.nativeSymbol || 'native'})`);
+  tokenEntries.forEach(([sym, t], i) => {
+    console.log(`${sym.padEnd(12)}: ${ethers.formatUnits(tokenBalances[i], t.decimals || 18)}`);
+  });
   console.log(`nonce latest: ${latNonce}`);
   console.log(`nonce pend  : ${penNonce}`);
   console.log(`stuck tx    : ${stuck}  ${stuck > 0 ? '⚠️  TX PENDING DI MEMPOOL' : 'ok'}`);

@@ -1,14 +1,40 @@
 'use strict';
 require('dotenv').config();
 const chalk = require('chalk');
-const chain = require('../config/chain');
-const { loadPrivateKeys } = require('./wallets');
-const { runBalance } = require('./flows/balance');
-const { runBridge } = require('./flows/bridge');
-const { runResume } = require('./flows/resume');
-const { runFarmOnce } = require('./flows/farm');
-const tg = require('./telegram');
-const { sleep } = require('./utils');
+const arcChain = require('./chains/arc/config');
+const litvmChain = require('./chains/litvm/config');
+const { loadPrivateKeys } = require('./shared/wallets');
+const { runBalance: runArcBalance } = require('./chains/arc/flows/balance');
+const { runBridge: runArcBridge } = require('./chains/arc/flows/bridge');
+const { runResume: runArcResume } = require('./chains/arc/flows/resume');
+const { runFarmOnce: runArcFarmOnce } = require('./chains/arc/flows/farm');
+const { runFarmOnce: runLitvmFarmOnce, runBalance: runLitvmBalance } = require('./chains/litvm/flows/farm');
+const tg = require('./shared/telegram');
+const { sleep } = require('./shared/utils');
+
+// Chain registry — daftar chain yang tersedia
+const CHAINS = {
+  arc: {
+    name: 'Arc Testnet',
+    config: arcChain,
+    runFarmOnce: runArcFarmOnce,
+    runBalance: runArcBalance,
+    runBridge: runArcBridge,
+    runResume: runArcResume,
+    hasBridge: true,
+    hasResume: true,
+  },
+  litvm: {
+    name: 'LitVM Testnet',
+    config: litvmChain,
+    runFarmOnce: runLitvmFarmOnce,
+    runBalance: runLitvmBalance,
+    runBridge: null,
+    runResume: null,
+    hasBridge: false, // TODO: implement Caldera bridge
+    hasResume: false,
+  },
+};
 
 // @inquirer/prompts v7 adalah ESM. Pakai dynamic import di CJS.
 let _prompts = null;
@@ -30,15 +56,12 @@ function header() {
   const dailyStat = dailyState.running
     ? chalk.green(`RUNNING (cycle #${dailyState.cycle})`)
     : chalk.gray('IDLE');
+  const chainList = Object.values(CHAINS).map((c) => `${c.name} (${c.config.chainId})`).join(', ');
   console.log('');
   console.log(chalk.cyan('╔════════════════════════════════════════════╗'));
-  console.log(chalk.cyan('║       ') + chalk.bold.white('ARC TESTNET FARM') + chalk.cyan('                     ║'));
+  console.log(chalk.cyan('║       ') + chalk.bold.white('LIST TESTNET FARM') + chalk.cyan('                    ║'));
   console.log(chalk.cyan('╠════════════════════════════════════════════╣'));
-  console.log(
-    chalk.cyan('║ ') +
-      `Chain : ${chain.name} (${chain.chainId})`.padEnd(43) +
-      chalk.cyan('║')
-  );
+  console.log(chalk.cyan('║ ') + `Chains  : ${chainList}`.padEnd(43) + chalk.cyan('║'));
   console.log(
     chalk.cyan('║ ') +
       `Wallets: ${wallets}`.padEnd(20) +
@@ -47,17 +70,40 @@ function header() {
   );
   console.log(
     chalk.cyan('║ ') +
-      `Daily : ${dailyStat}`.padEnd(43 + (dailyState.running ? 9 : 10)) +
+      `Daily  : ${dailyStat}`.padEnd(43 + (dailyState.running ? 9 : 10)) +
       chalk.cyan('║')
   );
   console.log(chalk.cyan('╚════════════════════════════════════════════╝'));
   console.log('');
 }
 
+// Helper: tanya scope (all / specific chain)
+async function pickScope(actionLabel) {
+  const { select } = await prompts();
+  const choices = [];
+  const chainKeys = Object.keys(CHAINS);
+  if (chainKeys.length > 1) {
+    choices.push({ name: `🌐  ALL — ${actionLabel} di semua chain (paralel)`, value: 'all' });
+  }
+  for (const k of chainKeys) {
+    const c = CHAINS[k];
+    choices.push({ name: `⚡  ${c.name} only`, value: k });
+  }
+  choices.push({ name: '← Back', value: 'back' });
+  return select({ message: `Pilih scope ${actionLabel}:`, choices, loop: false });
+}
+
 async function menuBalance() {
   header();
+  const scope = await pickScope('check balance');
+  if (scope === 'back') return;
   try {
-    await runBalance();
+    if (scope === 'all') {
+      const tasks = Object.values(CHAINS).map((c) => c.runBalance().catch((e) => console.log(chalk.red(`[${c.name}] ${e.message}`))));
+      await Promise.all(tasks);
+    } else {
+      await CHAINS[scope].runBalance();
+    }
   } catch (e) {
     console.log(chalk.red('Error: ' + e.message));
   }
@@ -65,25 +111,50 @@ async function menuBalance() {
 }
 
 async function menuBridge() {
-  const { input, confirm } = await prompts();
   header();
+  // Filter chain yang punya bridge
+  const bridgeChains = Object.fromEntries(Object.entries(CHAINS).filter(([, c]) => c.hasBridge));
+  if (Object.keys(bridgeChains).length === 0) {
+    console.log(chalk.gray('Tidak ada chain dengan bridge.'));
+    await pause();
+    return;
+  }
+  const { input, confirm, select } = await prompts();
+
+  // Pilih chain (kalau lebih dari 1)
+  let chainKey;
+  if (Object.keys(bridgeChains).length === 1) {
+    chainKey = Object.keys(bridgeChains)[0];
+  } else {
+    chainKey = await select({
+      message: 'Pilih chain tujuan bridge:',
+      choices: [
+        ...Object.entries(bridgeChains).map(([k, c]) => ({ name: `🚀  ${c.name}`, value: k })),
+        { name: '← Back', value: 'back' },
+      ],
+      loop: false,
+    });
+    if (chainKey === 'back') return;
+  }
+  const sel = bridgeChains[chainKey];
+
   const amount = await input({
-    message: 'Amount USDC to bridge per wallet:',
+    message: `Amount to bridge per wallet:`,
     default: process.env.BRIDGE_AMOUNT_USDC || '1',
     validate: (v) => (!isNaN(Number(v)) && Number(v) > 0) || 'Masukkan angka > 0',
   });
   const dest = await input({
-    message: 'Destination address di Arc (kosongkan = self):',
+    message: `Destination address di ${sel.name} (kosongkan = self):`,
     default: '',
   });
   const parallel = await confirm({
     message: 'Jalankan semua wallet PARALEL? (lebih cepat, recommended)',
     default: true,
   });
-  const ok = await confirm({ message: `Bridge ${amount} USDC untuk SEMUA wallet?`, default: false });
+  const ok = await confirm({ message: `Bridge ${amount} ke ${sel.name} untuk SEMUA wallet?`, default: false });
   if (!ok) return;
   try {
-    await runBridge({ amountUsdc: amount, destAddress: dest || null, parallel });
+    await sel.runBridge({ amountUsdc: amount, destAddress: dest || null, parallel });
   } catch (e) {
     console.log(chalk.red('Error: ' + e.message));
   }
@@ -113,8 +184,9 @@ async function menuResume() {
     choices,
   });
 
+  // Resume hanya untuk Arc (CCTP) sekarang
   try {
-    await runResume({ burnTxHash: burnTxHash.trim(), walletIndex });
+    await CHAINS.arc.runResume({ burnTxHash: burnTxHash.trim(), walletIndex });
   } catch (e) {
     console.log(chalk.red('Error: ' + (e.shortMessage || e.message)));
   }
@@ -128,20 +200,38 @@ async function menuDailyFarm() {
   console.log(chalk.yellow('Round pertama jalan SEKARANG, lalu tunggu 24 jam, ulang, dst.'));
   console.log(chalk.yellow('Tekan Ctrl+C untuk stop.'));
   console.log('');
+
+  const scope = await pickScope('daily farming');
+  if (scope === 'back') return;
+
   const ok = await confirm({ message: 'Mulai daily farming?', default: true });
   if (!ok) return;
 
   dailyState.running = true;
   dailyState.cycle = 0;
 
+  // Resolve target chain(s)
+  const targets = scope === 'all'
+    ? Object.entries(CHAINS).map(([k, c]) => ({ key: k, chain: c }))
+    : [{ key: scope, chain: CHAINS[scope] }];
+
   try {
-    // eslint-disable-next-line no-constant-condition
     while (dailyState.running) {
       dailyState.cycle++;
       header();
-      console.log(chalk.bold(`═══ Cycle #${dailyState.cycle} — ${new Date().toISOString()} ═══`));
+      const scopeLabel = scope === 'all' ? 'ALL TESTNETS' : CHAINS[scope].name;
+      console.log(chalk.bold(`═══ Cycle #${dailyState.cycle} — ${scopeLabel} — ${new Date().toISOString()} ═══`));
       try {
-        await runFarmOnce();
+        if (targets.length === 1) {
+          await targets[0].chain.runFarmOnce();
+        } else {
+          // Run all chains in parallel
+          await Promise.all(
+            targets.map((t) =>
+              t.chain.runFarmOnce().catch((e) => console.log(chalk.red(`[${t.chain.name}] cycle error: ${e.message}`)))
+            )
+          );
+        }
       } catch (e) {
         console.log(chalk.red('Cycle error: ' + e.message));
       }

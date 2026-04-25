@@ -4,14 +4,15 @@ const path = require('path');
 const chalk = require('chalk');
 const ora = require('ora');
 const { ethers } = require('ethers');
-const chain = require('../../config/chain');
-const { loadWallets } = require('../wallets');
-const { shortAddr, randDelay, withRetry } = require('../utils');
-const { logFile } = require('../logger');
-const tg = require('../telegram');
+const chain = require('../config');
+const { loadWallets } = require('../../../shared/wallets');
+const { shortAddr, randDelay, withRetry } = require('../../../shared/utils');
+const { logFile } = require('../../../shared/logger');
+const tg = require('../../../shared/telegram');
 
 // Progress file — supaya cycle yang terputus bisa resume tanpa ulang wallet yang udah selesai.
-const PROGRESS_FILE = path.join(__dirname, '..', '..', '.farm-progress.json');
+// Progress file per-chain (so multi-chain mode can run parallel without conflict)
+const PROGRESS_FILE = path.join(__dirname, '..', '..', '..', '..', '.progress.arc.json');
 
 function loadProgress(totalWallets) {
   try {

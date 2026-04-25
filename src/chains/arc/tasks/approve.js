@@ -1,8 +1,8 @@
 'use strict';
 const { ethers } = require('ethers');
-const chain = require('../../config/chain');
-const erc20Abi = require('../abi/erc20');
-const { shortAddr, txUrl, log, randInt } = require('../utils');
+const chain = require('../config');
+const erc20Abi = require('../../../shared/abi/erc20');
+const { shortAddr, txUrl, log, randInt } = require('../../../shared/utils');
 
 async function approveToken(wallet, tokenKey, spender, amount) {
   const token = chain.tokens[tokenKey];

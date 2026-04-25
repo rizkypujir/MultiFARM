@@ -2,7 +2,7 @@
 const { ethers } = require('ethers');
 const { loadArtifact, hasArtifact } = require('../artifacts');
 const { deployMinimal } = require('./deploy');
-const { shortAddr, txUrl, log, randomName } = require('../utils');
+const { shortAddr, txUrl, log, randomName } = require('../../../shared/utils');
 
 async function deployErc20Real(wallet) {
   if (!hasArtifact('SimpleERC20')) {
@@ -29,7 +29,7 @@ async function deployErc20Real(wallet) {
 }
 
 async function main() {
-  const { loadWallets } = require('../wallets');
+  const { loadWallets } = require('../../../shared/wallets');
   const wallets = loadWallets();
   for (const w of wallets) {
     try {

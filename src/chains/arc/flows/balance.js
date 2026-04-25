@@ -2,11 +2,11 @@
 const chalk = require('chalk');
 const ora = require('ora');
 const { ethers } = require('ethers');
-const chain = require('../../config/chain');
-const erc20Abi = require('../abi/erc20');
+const chain = require('../config');
+const erc20Abi = require('../../../shared/abi/erc20');
 const { getProvider } = require('../provider');
-const { loadWallets } = require('../wallets');
-const { shortAddr } = require('../utils');
+const { loadWallets } = require('../../../shared/wallets');
+const { shortAddr } = require('../../../shared/utils');
 
 async function runBalance() {
   const wallets = loadWallets();

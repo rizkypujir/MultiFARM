@@ -1,6 +1,6 @@
 'use strict';
 const { ethers } = require('ethers');
-const { shortAddr, txUrl, log } = require('../utils');
+const { shortAddr, txUrl, log } = require('../../../shared/utils');
 
 // Minimal init code: mendeploy kontrak dengan runtime code berisi 1 byte STOP (0x00).
 // Kontrak valid di-onchain (punya address & bytecode) tapi cuma STOP saat dipanggil.

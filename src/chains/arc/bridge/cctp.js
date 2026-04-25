@@ -2,8 +2,8 @@
 require('dotenv').config();
 const { ethers } = require('ethers');
 const { Agent } = require('undici');
-const { loadPrivateKeys } = require('../wallets');
-const { log, shortAddr, sleep } = require('../utils');
+const { loadPrivateKeys } = require('../../../shared/wallets');
+const { log, shortAddr, sleep } = require('../../../shared/utils');
 
 // Custom dispatcher untuk IRIS: skip TLS verify.
 // Alasan: pada sebagian sistem (jam/clock skew, trust store outdated, environment kantor)

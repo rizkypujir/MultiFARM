@@ -1,10 +1,10 @@
 'use strict';
 require('dotenv').config();
-const chain = require('../config/chain');
-const { loadWallets } = require('./wallets');
-const { balanceOf } = require('./tasks/balance');
-const { resolveEnabled } = require('./tasks');
-const { log, shortAddr, pick, randDelay, sleep, randInt } = require('./utils');
+const chain = require('./chains/arc/config');
+const { loadWallets } = require('./shared/wallets');
+const { balanceOf } = require('./chains/arc/tasks/balance');
+const { resolveEnabled } = require('./chains/arc/tasks');
+const { log, shortAddr, pick, randDelay, sleep, randInt } = require('./shared/utils');
 
 const TX_PER_WALLET = Number(process.env.TX_PER_WALLET || 10);
 const DELAY_MIN = Number(process.env.DELAY_MIN_MS || 3000);

@@ -1,8 +1,8 @@
 'use strict';
 const { ethers } = require('ethers');
-const chain = require('../../config/chain');
-const erc20Abi = require('../abi/erc20');
-const { shortAddr, txUrl, log } = require('../utils');
+const chain = require('../config');
+const erc20Abi = require('../../../shared/abi/erc20');
+const { shortAddr, txUrl, log } = require('../../../shared/utils');
 
 function randomAddress() {
   return ethers.Wallet.createRandom().address;

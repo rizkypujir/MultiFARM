@@ -1,6 +1,6 @@
 'use strict';
 const { ethers } = require('ethers');
-const chain = require('../config/chain');
+const chain = require('./config');
 
 let _provider;
 function getProvider() {

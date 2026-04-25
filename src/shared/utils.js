@@ -1,5 +1,13 @@
 'use strict';
-const chain = require('../config/chain');
+// Lazy require karena ini shared module — Arc config jadi default backward-compat.
+// Kalau task spesifik chain butuh explorer custom, pakai txUrl(hash, explorerUrl).
+function getDefaultExplorer() {
+  try {
+    return require('../chains/arc/config').explorer;
+  } catch {
+    return '';
+  }
+}
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -23,8 +31,9 @@ function shortAddr(a) {
   return a ? a.slice(0, 6) + '..' + a.slice(-4) : '';
 }
 
-function txUrl(hash) {
-  return `${chain.explorer}/tx/${hash}`;
+function txUrl(hash, explorerUrl) {
+  const base = explorerUrl || getDefaultExplorer();
+  return `${base}/tx/${hash}`;
 }
 
 function now() {

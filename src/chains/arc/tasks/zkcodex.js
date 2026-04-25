@@ -1,6 +1,6 @@
 'use strict';
 const { ethers } = require('ethers');
-const { shortAddr, txUrl, log } = require('../utils');
+const { shortAddr, txUrl, log } = require('../../../shared/utils');
 
 // ===== zkCodex Arc Testnet contracts =====
 // Sumber: https://zkcodex.com/onchain/

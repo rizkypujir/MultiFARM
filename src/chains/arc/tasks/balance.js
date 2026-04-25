@@ -1,10 +1,10 @@
 'use strict';
 const { ethers } = require('ethers');
-const chain = require('../../config/chain');
-const erc20Abi = require('../abi/erc20');
+const chain = require('../config');
+const erc20Abi = require('../../../shared/abi/erc20');
 const { getProvider } = require('../provider');
-const { loadWallets } = require('../wallets');
-const { shortAddr, log } = require('../utils');
+const { loadWallets } = require('../../../shared/wallets');
+const { shortAddr, log } = require('../../../shared/utils');
 
 async function balanceOf(wallet) {
   const provider = getProvider();

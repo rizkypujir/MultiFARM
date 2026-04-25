@@ -2,7 +2,7 @@
 const { ethers } = require('ethers');
 const { loadArtifact, hasArtifact } = require('../artifacts');
 const { deployMinimal } = require('./deploy');
-const { shortAddr, txUrl, log, randomName } = require('../utils');
+const { shortAddr, txUrl, log, randomName } = require('../../../shared/utils');
 
 async function deployNftReal(wallet) {
   if (!hasArtifact('SimpleNFT')) {
@@ -37,7 +37,7 @@ async function deployNftReal(wallet) {
 }
 
 async function main() {
-  const { loadWallets } = require('../wallets');
+  const { loadWallets } = require('../../../shared/wallets');
   const wallets = loadWallets();
   for (const w of wallets) {
     try {

@@ -1,11 +1,11 @@
 'use strict';
 const chalk = require('chalk');
 const ora = require('ora');
-const { loadPrivateKeys } = require('../wallets');
+const { loadPrivateKeys } = require('../../../shared/wallets');
 const { bridgeOne } = require('../bridge/cctp');
-const { shortAddr } = require('../utils');
-const { logFile } = require('../logger');
-const tg = require('../telegram');
+const { shortAddr } = require('../../../shared/utils');
+const { logFile } = require('../../../shared/logger');
+const tg = require('../../../shared/telegram');
 
 async function runBridge({ amountUsdc, destAddress, parallel = true }) {
   const pks = loadPrivateKeys();

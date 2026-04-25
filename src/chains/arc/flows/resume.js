@@ -1,10 +1,10 @@
 'use strict';
 const chalk = require('chalk');
 const ora = require('ora');
-const { loadPrivateKeys } = require('../wallets');
+const { loadPrivateKeys } = require('../../../shared/wallets');
 const { resumeBridge } = require('../bridge/cctp');
-const { shortAddr } = require('../utils');
-const { logFile } = require('../logger');
+const { shortAddr } = require('../../../shared/utils');
+const { logFile } = require('../../../shared/logger');
 
 async function runResume({ burnTxHash, walletIndex = 0 }) {
   const pks = loadPrivateKeys();

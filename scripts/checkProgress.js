@@ -2,14 +2,15 @@
 /**
  * Cek progress farming per wallet.
  * Sumber data:
- *   1. .farm-progress.json (live state — wallet yang sudah/lagi diproses di cycle saat ini)
- *   2. logs/farm-YYYYMMDD.log (history task ok/fail/skip per wallet)
+ *   1. .progress.<chain>.json (live state — wallet yang sudah/lagi diproses di cycle saat ini)
+ *   2. logs/<chain>-YYYYMMDD.log (history task ok/fail/skip per wallet)
  *
  * Usage:
- *   node scripts/checkProgress.js                # ringkasan semua wallet hari ini
- *   node scripts/checkProgress.js --pending      # cuma tampilkan wallet yang belum kelar 14 task
- *   node scripts/checkProgress.js --date 20260424  # log tanggal lain
- *   node scripts/checkProgress.js --wallet 0xabc.. # detail 1 wallet
+ *   node scripts/checkProgress.js                          # default chain arc
+ *   node scripts/checkProgress.js --chain litvm            # specific chain
+ *   node scripts/checkProgress.js --pending                # cuma yang belum kelar
+ *   node scripts/checkProgress.js --date 20260424          # log tanggal lain
+ *   node scripts/checkProgress.js --wallet 0xabc..         # detail 1 wallet
  */
 require('dotenv').config();
 const fs = require('fs');
@@ -18,9 +19,8 @@ const { ethers } = require('ethers');
 
 const ROOT = path.join(__dirname, '..');
 const LOG_DIR = path.join(ROOT, 'logs');
-const PROGRESS_FILE = path.join(ROOT, '.farm-progress.json');
 
-const TOTAL_TASKS = 14; // sesuai SEQUENCE di src/flows/farm.js
+const TOTAL_TASKS = 14; // sesuai SEQUENCE di src/chains/<chain>/flows/farm.js
 
 // ===== ANSI colors (no chalk dep biar ringan) =====
 const c = {
@@ -35,12 +35,13 @@ const c = {
 };
 
 function parseArgs() {
-  const args = { pending: false, date: null, wallet: null };
+  const args = { pending: false, date: null, wallet: null, chain: 'arc' };
   const argv = process.argv.slice(2);
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--pending') args.pending = true;
     else if (argv[i] === '--date') args.date = argv[++i];
     else if (argv[i] === '--wallet') args.wallet = argv[++i].toLowerCase();
+    else if (argv[i] === '--chain') args.chain = argv[++i];
   }
   return args;
 }
@@ -76,10 +77,10 @@ function loadWalletList() {
   return [];
 }
 
-function loadProgress() {
+function loadProgress(progressPath) {
   try {
-    if (!fs.existsSync(PROGRESS_FILE)) return null;
-    return JSON.parse(fs.readFileSync(PROGRESS_FILE, 'utf8'));
+    if (!fs.existsSync(progressPath)) return null;
+    return JSON.parse(fs.readFileSync(progressPath, 'utf8'));
   } catch {
     return null;
   }
@@ -137,14 +138,23 @@ function fmtAddr(a) {
 function main() {
   const args = parseArgs();
   const dateStr = args.date || todayStamp();
-  const logFile = path.join(LOG_DIR, `farm-${dateStr}.log`);
+  // Try chain-prefixed log first (new), fall back to old farm-* format for backward compat
+  let logFile = path.join(LOG_DIR, `${args.chain}-${dateStr}.log`);
+  if (!fs.existsSync(logFile)) {
+    const legacy = path.join(LOG_DIR, `farm-${dateStr}.log`);
+    if (fs.existsSync(legacy)) logFile = legacy;
+  }
+  const PROGRESS_FILE = path.join(ROOT, `.progress.${args.chain}.json`);
+  // Backward compat
+  const LEGACY_PROGRESS = path.join(ROOT, '.farm-progress.json');
+  const progressPath = fs.existsSync(PROGRESS_FILE) ? PROGRESS_FILE : LEGACY_PROGRESS;
 
   console.log('');
-  console.log(c.cyan + c.bold + 'ARC FARM — Progress Check' + c.reset);
+  console.log(c.cyan + c.bold + `${args.chain.toUpperCase()} FARM — Progress Check` + c.reset);
   console.log(c.gray + 'Log file: ' + logFile + c.reset);
 
   const allWallets = loadWalletList();
-  const progress = loadProgress();
+  const progress = loadProgress(progressPath);
   const stats = parseLog(logFile);
 
   if (!stats) {
