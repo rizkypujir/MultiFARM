@@ -9,3 +9,7 @@ logs/
 artifacts/
 cache/
 typechain-types/
+
+# Research cache (frontend bundles for contract address extraction)
+.cache/
+
