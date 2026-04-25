@@ -1,7 +1,7 @@
 {
-  "name": "arc-testnet-farm",
+  "name": "multi-testnet-farm",
   "version": "1.0.0",
-  "description": "Multi-wallet farming & tx generator for Arc Testnet (Circle L1)",
+  "description": "Multi-wallet farming & tx generator for Arc and LitVM testnets",
   "main": "src/index.js",
   "type": "commonjs",
   "scripts": {
