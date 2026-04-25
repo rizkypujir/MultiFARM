@@ -1,39 +1,83 @@
-# Multi Testnet Farm
+# MultiFARM
 
-Multi-wallet farming and transaction generator for:
+MultiFARM is a multi-wallet testnet farming helper for Arc Testnet and
+LitVM / LiteForge Testnet.
 
-- Arc Testnet
-- LitVM / LiteForge Testnet
+It is made for repeated testnet activity: balance checks, small transfers,
+approvals, contract deploys, Arc CCTP bridge/resume, LitVM OnmiFun tasks, and
+daily 24 hour farming loops.
 
-The bot supports balance checks, Arc CCTP bridge/resume, daily 24h farming loops, per-chain logs, and optional Telegram notifications.
+> Testnet only. Use burner wallets. Never use mainnet private keys.
 
-## Safety
+## What It Supports
 
-Do not commit private wallet files or runtime secrets. The repo ignores:
+| Network | Chain ID | Gas token | Notes |
+| --- | ---: | --- | --- |
+| Arc Testnet | `5042002` | USDC | Uses native USDC on Arc. |
+| LitVM / LiteForge | `4441` | zkLTC | Uses zkLTC and WzkLTC. No USDC is needed for LitVM farming. |
 
-- `.env`
-- `wallets.txt`
-- `wallets.addresses.txt`
-- `test-wallet.txt`
-- `logs/`
-- `.cache/`
-- `artifacts/`
-- `cache/`
-- `node_modules/`
+## Features
 
-Only `.env.example` should be committed as the public config reference.
+- Multi-wallet runner from `wallets.txt` or `PRIVATE_KEYS`
+- Arc-only, LitVM-only, or all-chain mode
+- Parallel Arc + LitVM daily farming with one clean terminal dashboard
+- Arc CCTP bridge from Sepolia and resume by burn transaction hash
+- LitVM zkLTC/WzkLTC farming tasks
+- Per-chain logs under `logs/`
+- Optional Telegram notifications
+- Git ignore rules for private keys, local env files, logs, and runtime cache
 
-## Setup
+## Quick Start
 
 ```bash
-git clone https://github.com/rizkypujir/FARM.git
-cd FARM
+git clone https://github.com/rizkypujir/MultiFARM.git
+cd MultiFARM
 npm install
 npm run compile
 cp .env.example .env
+npm start
 ```
 
-Edit `.env` if needed. The current example is tuned for the default public/testnet setup:
+On Windows PowerShell, copy the example env file with:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+After copying, open `.env` and adjust only what you need.
+
+## Wallet Setup
+
+Recommended setup: put one private key per line in `wallets.txt`.
+
+```text
+0xabc...
+0xdef...
+```
+
+You can generate burner wallets with:
+
+```bash
+node scripts/generateWallets.js 10
+```
+
+The generated private keys go to `wallets.txt`, and public addresses go to
+`wallets.addresses.txt`. Both files are ignored by git.
+
+You can also put comma-separated private keys in `.env`:
+
+```env
+PRIVATE_KEYS=0xabc...,0xdef...
+```
+
+For public use, `wallets.txt` is usually easier to manage.
+
+## Configuration
+
+The public reference config is `.env.example`. Your real local config should be
+`.env`, and `.env` must stay private.
+
+Important defaults:
 
 ```env
 RPC_URL=https://rpc.drpc.testnet.arc.network
@@ -49,17 +93,11 @@ DELAY_MAX_MS=500
 BATCH_SIZE=2
 LITVM_BATCH_SIZE=2
 COUNTER_PER_CYCLE=1
+TASK_TIMEOUT_MS=180000
 ```
 
-## Wallets
-
-Recommended: use `wallets.txt`, one private key per line.
-
-```bash
-node scripts/generateWallets.js 10
-```
-
-You can also set `PRIVATE_KEYS` in `.env`, comma-separated, but `wallets.txt` is easier for multi-wallet runs.
+If the public Arc RPC feels slow or unstable, use your own RPC endpoint and set
+it in `RPC_URL`.
 
 ## Run
 
@@ -67,40 +105,54 @@ You can also set `PRIVATE_KEYS` in `.env`, comma-separated, but `wallets.txt` is
 npm start
 ```
 
-Menu:
+The menu includes:
 
-- Check balance for Arc, LitVM, or all chains
+- Check Arc balance
+- Check LitVM balance
+- Check all balances
 - Bridge Sepolia USDC to Arc
-- Resume Arc CCTP bridge by burn tx hash
-- Start daily farming loop every 24 hours
+- Resume Arc CCTP bridge by burn transaction hash
+- Run Arc daily farming
+- Run LitVM daily farming
+- Run all supported chains in parallel
 - Configure or test Telegram notifications
 
-In `ALL` daily mode, Arc and LitVM run in parallel. The terminal shows a single dashboard line such as:
+In all-chain daily mode, Arc and LitVM run together. The terminal uses one
+dashboard line so the output stays readable:
 
 ```text
 [/] Arc 3/14   LitVM 5/11
 ```
 
-## Chain Notes
+## Arc Notes
 
-### Arc Testnet
+Arc uses native USDC as its gas token.
 
-- Chain ID: `5042002`
-- Gas token: native USDC
-- Default RPC in `.env.example`: `https://rpc.drpc.testnet.arc.network`
-- Explorer: `https://testnet.arcscan.app`
+Common Arc tasks include:
 
-Arc farming tasks include USDC/EURC transfers, approvals, contract deploys, NFT minting, and zkCodex calls.
+- USDC and EURC transfers
+- Token approvals
+- Contract deploys
+- NFT minting
+- zkCodex calls
+- CCTP bridge/resume flow
 
-### LitVM Testnet
+Arc testnet RPC errors can happen during busy periods. The bot retries many
+transient failures, but a private or higher quality RPC usually gives smoother
+runs.
 
-- Chain ID: `4441`
-- Gas token: zkLTC
-- Wrapped token: WzkLTC
-- Default RPC: `https://liteforge.rpc.caldera.xyz/http`
-- Explorer: `https://liteforge.explorer.caldera.xyz`
+## LitVM Notes
 
-LitVM farming tasks use zkLTC/WzkLTC, OnmiFun swap/liquidity tasks, and contract deploys. LitVM does not use USDC in the active farming flow.
+LitVM / LiteForge uses zkLTC as gas and WzkLTC for wrapped-token tasks.
+
+Common LitVM tasks include:
+
+- zkLTC balance checks
+- WzkLTC wrap/unwrap related activity
+- OnmiFun swap and liquidity tasks
+- Contract deploys
+
+LitVM farming does not require USDC in the active flow.
 
 ## Useful Scripts
 
@@ -111,20 +163,64 @@ node scripts/verifyOnmiFun.js
 node scripts/testLitvm.js --task balance --wallet 0
 ```
 
-## VPS
+## Running On A VPS
 
 ```bash
-screen -S farm
+screen -S multifarm
 npm start
-# detach: Ctrl+A then D
-# attach: screen -r farm
+```
+
+Detach from screen:
+
+```text
+Ctrl+A then D
+```
+
+Attach again:
+
+```bash
+screen -r multifarm
 ```
 
 ## Logs
 
-Runtime logs are written under `logs/` and are ignored by git:
+Runtime logs are written under `logs/`:
 
-- `logs/arc-YYYYMMDD.log`
-- `logs/litvm-YYYYMMDD.log`
+```text
+logs/arc-YYYYMMDD.log
+logs/litvm-YYYYMMDD.log
+```
 
-If a task fails, check the matching chain log first. Some Arc testnet RPC errors are transient and the bot retries automatically.
+If something fails, check the matching chain log first. Logs are ignored by git.
+
+## Security Checklist
+
+Before pushing your own fork, make sure these files are not committed:
+
+- `.env`
+- `wallets.txt`
+- `wallets.addresses.txt`
+- `test-wallet.txt`
+- `logs/`
+- `.cache/`
+- `artifacts/`
+- `cache/`
+- `node_modules/`
+
+Only commit `.env.example` as the public config reference.
+
+## Troubleshooting
+
+| Problem | What to try |
+| --- | --- |
+| Arc feels slow | Use a better RPC in `RPC_URL`, lower `BATCH_SIZE`, or wait for RPC congestion to clear. |
+| LitVM skips tasks | Check zkLTC balance and the LitVM log file. |
+| All-chain mode looks stuck | Arc and LitVM run in parallel; check each chain counter and logs. |
+| Bridge is pending | Use the resume menu with the Arc CCTP burn transaction hash. |
+| Telegram does not send | Recheck `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and run the test notification menu. |
+
+## Disclaimer
+
+This project is for testnet automation and learning. Testnet networks, RPCs,
+contracts, faucets, and dApps can change at any time, so always review config
+and task behavior before running many wallets.
