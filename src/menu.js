@@ -56,24 +56,25 @@ function header() {
   const dailyStat = dailyState.running
     ? chalk.green(`RUNNING (cycle #${dailyState.cycle})`)
     : chalk.gray('IDLE');
-  const chainList = Object.values(CHAINS).map((c) => `${c.name} (${c.config.chainId})`).join(', ');
+  // Width 56 chars antara ║ ... ║ (44 sebelumnya terlalu sempit untuk 2 chain)
+  const W = 56;
+  const line = (s) => {
+    // Strip color codes for length calculation
+    const visible = s.replace(/\x1b\[[0-9;]*m/g, '');
+    const pad = Math.max(0, W - visible.length);
+    return chalk.cyan('║ ') + s + ' '.repeat(pad) + chalk.cyan(' ║');
+  };
+  // Per-chain status (1 line per chain)
+  const chainLines = Object.values(CHAINS).map((c) => `${c.name.padEnd(16)} chainId=${c.config.chainId}`);
+
   console.log('');
-  console.log(chalk.cyan('╔════════════════════════════════════════════╗'));
-  console.log(chalk.cyan('║       ') + chalk.bold.white('LIST TESTNET FARM') + chalk.cyan('                    ║'));
-  console.log(chalk.cyan('╠════════════════════════════════════════════╣'));
-  console.log(chalk.cyan('║ ') + `Chains  : ${chainList}`.padEnd(43) + chalk.cyan('║'));
-  console.log(
-    chalk.cyan('║ ') +
-      `Wallets: ${wallets}`.padEnd(20) +
-      `Telegram: ${tgStat}`.padEnd(27 + (tg.isEnabled() ? 9 : 10)) +
-      chalk.cyan('║')
-  );
-  console.log(
-    chalk.cyan('║ ') +
-      `Daily  : ${dailyStat}`.padEnd(43 + (dailyState.running ? 9 : 10)) +
-      chalk.cyan('║')
-  );
-  console.log(chalk.cyan('╚════════════════════════════════════════════╝'));
+  console.log(chalk.cyan('╔') + '═'.repeat(W + 2) + chalk.cyan('╗'));
+  console.log(line(chalk.bold.white('LIST TESTNET FARM')));
+  console.log(chalk.cyan('╠') + '═'.repeat(W + 2) + chalk.cyan('╣'));
+  for (const cl of chainLines) console.log(line(cl));
+  console.log(line(`Wallets: ${wallets}     Telegram: ${tgStat}`));
+  console.log(line(`Daily:   ${dailyStat}`));
+  console.log(chalk.cyan('╚') + '═'.repeat(W + 2) + chalk.cyan('╝'));
   console.log('');
 }
 
@@ -329,8 +330,8 @@ async function main() {
       message: 'Pilih menu:',
       choices: [
         { name: '📊  Check balance all wallets', value: 'balance' },
-        { name: '🚀  Bridge all wallets (Sepolia → Arc)', value: 'bridge' },
-        { name: '⚡  Resume bridge (mint only, pakai burn tx hash)', value: 'resume' },
+        { name: '🚀  Bridge wallets (Sepolia → testnet)', value: 'bridge' },
+        { name: '⚡  Resume bridge (Arc CCTP — pakai burn tx hash)', value: 'resume' },
         { name: '🔥  Start daily farming (auto loop 24h)', value: 'daily' },
         { name: '🔔  Telegram bot (setup / test)', value: 'tg' },
         { name: '❌  Exit', value: 'exit' },
