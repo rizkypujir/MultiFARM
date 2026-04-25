@@ -37,8 +37,15 @@ const config = {
       initCodeHash: '0x8f3e81720db33e14925a307158d291bb5d812d5cb6c34e54ecf0b33c126eab3f',
     },
     multicall3: '0xFd7e84304f83e4352a200F487b1cFF949e3e9755',
-    // TODO: Lester Labs token factory — cari dari lester-labs.com
-    lesterFactory: null,
+    // Lester Labs: DeFi suite (their own DEX, token factory, vesting)
+    // NOTE: Lester pakai WzkLTC sendiri yang BEDA dari OnmiFun
+    lester: {
+      tokenFactory: '0x93acc61fcdc2e3407A0c03450Adfd8aE78964948',
+      dexFactory: '0x017A126A44Aaae9273F7963D4E295F0Ee2793AD8',
+      dexRouter: '0xD56a623890b083d876D47c3b1c5343b7f983FA62',
+      vestingFactory: '0x6EE07118D39e9330Ef0658FFA797EeDD2CB823Cf',
+      wrappedZkLtc: '0xd141A5DDE1a3A373B7e9bb603362A58793AB9D97',
+    },
     // TODO: Ayni lending — cari dari aynilabs.xyz
     ayniSupply: null,
     // TODO: Midas Predict — cari dari midashand.xyz

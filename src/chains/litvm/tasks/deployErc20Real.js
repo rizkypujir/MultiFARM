@@ -25,8 +25,9 @@ async function deployErc20Real(wallet) {
   const factory = new ethers.ContractFactory(abi, bytecode, wallet);
   const name = randomName('LIT');
   const symbol = randomName('L').slice(0, 6);
+  const decimals = 18;
   const supply = ethers.parseUnits('1000000', 18);
-  const contract = await factory.deploy(name, symbol, supply);
+  const contract = await factory.deploy(name, symbol, decimals, supply);
   await withWaitTimeout(contract.deploymentTransaction(), 'deployErc20Real');
   const addr = await contract.getAddress();
   log('litvm:deployErc20', shortAddr(wallet.address), `${name}/${symbol}`, '->', addr, txUrl(contract.deploymentTransaction().hash, EXPLORER));

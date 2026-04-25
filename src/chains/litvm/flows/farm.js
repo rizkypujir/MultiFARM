@@ -18,6 +18,8 @@ const wrap = require('../tasks/wrap');
 const swap = require('../tasks/swap');
 const deploy = require('../tasks/deploy');
 const { deployErc20Real } = require('../tasks/deployErc20Real');
+const liquidity = require('../tasks/liquidity');
+const lester = require('../tasks/lester');
 
 // Progress file per-chain
 const PROGRESS_FILE = path.join(__dirname, '..', '..', '..', '..', '.progress.litvm.json');
@@ -69,19 +71,24 @@ const MIN_ZKLTC_FARM = process.env.LITVM_MIN_ZKLTC_FARM || '0.01';
 const BATCH_SIZE = Number(process.env.LITVM_BATCH_SIZE || process.env.BATCH_SIZE || 3);
 const WALLET_DEADLINE_MS = Number(process.env.WALLET_DEADLINE_MS || 600000);
 
-// Shared state across wallet (per-cycle): swap target token cache (untuk swapBack reuse)
+// Shared state across wallet (per-cycle): swap target token cache (untuk LP/swapBack reuse)
 const walletSwapState = new Map(); // addr -> { tokenAddr } (last bought token)
 
+// Optional task toggles
+const INCLUDE_LESTER = String(process.env.LITVM_INCLUDE_LESTER || 'false').toLowerCase() === 'true';
+
 // SEQUENCE — task per wallet, sequential
+// Default ~10 tasks (~0.005 zkLTC per wallet per cycle without Lester)
+// With LITVM_INCLUDE_LESTER=true: +1 task (lesterCreateToken, +0.05 zkLTC fee)
 const SEQUENCE = [
-  // 1. Native transfers (paling murah, bukti wallet hidup)
+  // 1-2. Native transfers (paling murah, bukti wallet hidup)
   { name: 'selfTransferZkLTC', fn: (w) => transfer.selfTransferZkLTC(w, SELF_ZKLTC) },
   { name: 'randomTransferZkLTC', fn: (w) => transfer.randomTransferZkLTC(w, SELF_ZKLTC) },
 
-  // 2. Wrap/unwrap (deterministic, no slippage)
+  // 3. Wrap zkLTC -> WzkLTC
   { name: 'wrapZkLTC', fn: (w) => wrap.wrapZkLTC(w, WRAP_AMOUNT) },
 
-  // 3. Swap zkLTC -> random memecoin via OnmiFun router
+  // 4. Swap zkLTC -> random memecoin via OnmiFun router (cache token for next tasks)
   {
     name: 'swapZkLTCForToken',
     fn: async (w) => {
@@ -91,27 +98,50 @@ const SEQUENCE = [
     },
   },
 
-  // 4. Swap back: token -> zkLTC (reuse token from previous task)
+  // 5. Add liquidity (use 50% token balance + matching zkLTC)
+  {
+    name: 'addLiquidityLP',
+    fn: async (w) => {
+      const st = walletSwapState.get(w.address.toLowerCase());
+      if (!st || !st.tokenAddr) throw new Error('no swap-state token for addLP');
+      return liquidity.addLiquidityZkLTC(w, st.tokenAddr);
+    },
+  },
+
+  // 6. Remove liquidity (burn 50% LP, get back zkLTC + token)
+  {
+    name: 'removeLiquidityLP',
+    fn: async (w) => {
+      const st = walletSwapState.get(w.address.toLowerCase());
+      if (!st || !st.tokenAddr) throw new Error('no swap-state token for removeLP');
+      return liquidity.removeLiquidityZkLTC(w, st.tokenAddr);
+    },
+  },
+
+  // 7. Swap remaining token back to zkLTC
   {
     name: 'swapTokenBack',
     fn: async (w) => {
       const st = walletSwapState.get(w.address.toLowerCase());
-      if (!st || !st.tokenAddr) throw new Error('no swap-state token (previous swap may have failed)');
+      if (!st || !st.tokenAddr) throw new Error('no swap-state token for swapBack');
       return swap.swapTokenForZkLTC(w, st.tokenAddr);
     },
   },
 
-  // 5. Unwrap setelah ada saldo WzkLTC
+  // 8. Unwrap setelah ada saldo WzkLTC
   { name: 'unwrapZkLTC', fn: (w) => wrap.unwrapZkLTC(w, UNWRAP_AMOUNT) },
 
-  // 6. Deploy minimal contract
+  // 9. Deploy minimal contract
   { name: 'deployMinimal', fn: (w) => deploy.deployMinimal(w) },
 
-  // 7. Deploy real ERC20 (fallback ke minimal kalau artifact gak ada)
+  // 10. Deploy ERC20 (fallback ke minimal kalau artifact gak ada)
   { name: 'deployErc20', fn: (w) => deployErc20Real(w) },
 
-  // 8. Wrap lagi (volume)
+  // 11. Wrap lagi (extra volume)
   { name: 'wrapZkLTC#2', fn: (w) => wrap.wrapZkLTC(w, WRAP_AMOUNT) },
+
+  // 12. (optional) Lester Labs token deploy — fee 0.05 zkLTC, mahal!
+  ...(INCLUDE_LESTER ? [{ name: 'lesterCreateToken', fn: (w) => lester.lesterCreateToken(w) }] : []),
 ];
 
 function installSilencer() {

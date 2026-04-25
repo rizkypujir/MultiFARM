@@ -27,6 +27,8 @@ const transfer = require('../src/chains/litvm/tasks/transfer');
 const wrap = require('../src/chains/litvm/tasks/wrap');
 const swap = require('../src/chains/litvm/tasks/swap');
 const deploy = require('../src/chains/litvm/tasks/deploy');
+const liquidity = require('../src/chains/litvm/tasks/liquidity');
+const lester = require('../src/chains/litvm/tasks/lester');
 
 const c = {
   reset: '\x1b[0m', red: '\x1b[31m', green: '\x1b[32m', yellow: '\x1b[33m', cyan: '\x1b[36m', gray: '\x1b[90m',
@@ -104,27 +106,43 @@ async function main() {
       console.log(c.yellow + 'Running deployMinimal...' + c.reset);
       const r = await deploy.deployMinimal(wallet);
       console.log(c.green + `Deployed at ${r.address}` + c.reset);
+    } else if (args.task === 'addLP') {
+      if (!args.tokenAddr) throw new Error('--token <address> required for addLP');
+      console.log(c.yellow + `Running addLiquidityZkLTC (${args.tokenAddr})...` + c.reset);
+      const r = await liquidity.addLiquidityZkLTC(wallet, args.tokenAddr);
+      console.log(c.green + `LP added! pair=${r.pairAddr}` + c.reset);
+    } else if (args.task === 'removeLP') {
+      if (!args.tokenAddr) throw new Error('--token <address> required for removeLP');
+      console.log(c.yellow + `Running removeLiquidityZkLTC (${args.tokenAddr})...` + c.reset);
+      await liquidity.removeLiquidityZkLTC(wallet, args.tokenAddr);
+    } else if (args.task === 'lester') {
+      console.log(c.yellow + 'Running lesterCreateToken (fee 0.05 zkLTC)...' + c.reset);
+      const r = await lester.lesterCreateToken(wallet);
+      console.log(c.green + `Token deployed at ${r.address}` + c.reset);
     } else if (args.task === 'all') {
-      // Run all in sequence (simulasi farm)
-      console.log(c.yellow + '[1/8] selfTransferZkLTC' + c.reset);
+      // Run all in sequence (simulasi farm) — mirror SEQUENCE in farm.js
+      console.log(c.yellow + '[1/11] selfTransferZkLTC' + c.reset);
       await transfer.selfTransferZkLTC(wallet, '0.0001');
-      console.log(c.yellow + '[2/8] randomTransferZkLTC' + c.reset);
+      console.log(c.yellow + '[2/11] randomTransferZkLTC' + c.reset);
       await transfer.randomTransferZkLTC(wallet, '0.0001');
-      console.log(c.yellow + '[3/8] wrapZkLTC 0.001' + c.reset);
+      console.log(c.yellow + '[3/11] wrapZkLTC 0.001' + c.reset);
       await wrap.wrapZkLTC(wallet, '0.001');
-      console.log(c.yellow + '[4/8] swapZkLTCForToken 0.0005' + c.reset);
-      const sw = await swap.swapZkLTCForToken(wallet, '0.0005');
-      console.log(c.yellow + '[5/8] swapTokenForZkLTC' + c.reset);
-      try {
-        await swap.swapTokenForZkLTC(wallet, sw.token);
-      } catch (e) {
-        console.log(c.red + 'swapBack failed (might be 0 balance after fee): ' + e.message + c.reset);
-      }
-      console.log(c.yellow + '[6/8] unwrapZkLTC 0.0005' + c.reset);
+      console.log(c.yellow + '[4/11] swapZkLTCForToken 0.001' + c.reset);
+      const sw = await swap.swapZkLTCForToken(wallet, '0.001');
+      console.log(c.yellow + '[5/11] addLiquidityLP' + c.reset);
+      try { await liquidity.addLiquidityZkLTC(wallet, sw.token); } catch (e) { console.log(c.red + 'addLP failed: ' + e.message + c.reset); }
+      console.log(c.yellow + '[6/11] removeLiquidityLP' + c.reset);
+      try { await liquidity.removeLiquidityZkLTC(wallet, sw.token); } catch (e) { console.log(c.red + 'removeLP failed: ' + e.message + c.reset); }
+      console.log(c.yellow + '[7/11] swapTokenForZkLTC' + c.reset);
+      try { await swap.swapTokenForZkLTC(wallet, sw.token); } catch (e) { console.log(c.red + 'swapBack failed: ' + e.message + c.reset); }
+      console.log(c.yellow + '[8/11] unwrapZkLTC 0.0005' + c.reset);
       await wrap.unwrapZkLTC(wallet, '0.0005');
-      console.log(c.yellow + '[7/8] deployMinimal' + c.reset);
+      console.log(c.yellow + '[9/11] deployMinimal' + c.reset);
       await deploy.deployMinimal(wallet);
-      console.log(c.yellow + '[8/8] wrapZkLTC #2' + c.reset);
+      console.log(c.yellow + '[10/11] deployErc20Real (fallback minimal)' + c.reset);
+      const { deployErc20Real } = require('../src/chains/litvm/tasks/deployErc20Real');
+      await deployErc20Real(wallet);
+      console.log(c.yellow + '[11/11] wrapZkLTC #2' + c.reset);
       await wrap.wrapZkLTC(wallet, '0.001');
     } else {
       console.error(c.red + 'Unknown task: ' + args.task + c.reset);
