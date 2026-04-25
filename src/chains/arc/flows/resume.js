@@ -4,7 +4,8 @@ const ora = require('ora');
 const { loadPrivateKeys } = require('../../../shared/wallets');
 const { resumeBridge } = require('../bridge/cctp');
 const { shortAddr } = require('../../../shared/utils');
-const { logFile } = require('../../../shared/logger');
+const { logFile: rawLogFile } = require('../../../shared/logger');
+const logFile = rawLogFile.withChain('arc');
 
 async function runResume({ burnTxHash, walletIndex = 0 }) {
   const pks = loadPrivateKeys();

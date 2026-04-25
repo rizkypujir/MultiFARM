@@ -7,7 +7,8 @@ const { ethers } = require('ethers');
 const chain = require('../config');
 const { loadWallets } = require('../../../shared/wallets');
 const { shortAddr, randDelay, withRetry } = require('../../../shared/utils');
-const { logFile } = require('../../../shared/logger');
+const { logFile: rawLogFile } = require('../../../shared/logger');
+const logFile = rawLogFile.withChain('arc');
 const tg = require('../../../shared/telegram');
 
 // Progress file — supaya cycle yang terputus bisa resume tanpa ulang wallet yang udah selesai.
