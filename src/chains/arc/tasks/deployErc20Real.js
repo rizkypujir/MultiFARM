@@ -1,6 +1,6 @@
 'use strict';
 const { ethers } = require('ethers');
-const { loadArtifact, hasArtifact } = require('../artifacts');
+const { loadArtifact, hasArtifact } = require('../../../shared/artifacts');
 const { deployMinimal } = require('./deploy');
 const { shortAddr, txUrl, log, randomName } = require('../../../shared/utils');
 

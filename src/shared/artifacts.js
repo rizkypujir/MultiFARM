@@ -2,10 +2,11 @@
 const fs = require('fs');
 const path = require('path');
 
+// Project-root anchored: <project>/artifacts/contracts/<Name>.sol/<Name>.json
+// Generated oleh `npm run compile` (Hardhat).
 function artifactPath(contractName) {
   return path.join(
-    __dirname,
-    '..',
+    process.cwd(),
     'artifacts',
     'contracts',
     `${contractName}.sol`,
