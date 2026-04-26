@@ -106,7 +106,7 @@ Pilih menu yang dibutuhkan:
 Mode semua chain menjalankan Arc dan LitVM bareng:
 
 ```text
-[/] Arc 3/14   LitVM 5/11
+[/] Arc 3/9   LitVM 5/10
 ```
 
 ## VPS

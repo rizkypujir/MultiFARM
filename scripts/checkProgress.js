@@ -20,7 +20,10 @@ const { ethers } = require('ethers');
 const ROOT = path.join(__dirname, '..');
 const LOG_DIR = path.join(ROOT, 'logs');
 
-const TOTAL_TASKS = 14; // sesuai SEQUENCE di src/chains/<chain>/flows/farm.js
+const TOTAL_TASKS_BY_CHAIN = {
+  arc: 9,
+  litvm: 10,
+};
 
 // ===== ANSI colors (no chalk dep biar ringan) =====
 const c = {
@@ -137,6 +140,7 @@ function fmtAddr(a) {
 
 function main() {
   const args = parseArgs();
+  const totalTasks = TOTAL_TASKS_BY_CHAIN[args.chain] || TOTAL_TASKS_BY_CHAIN.arc;
   const dateStr = args.date || todayStamp();
   // Try chain-prefixed log first (new), fall back to old farm-* format for backward compat
   let logFile = path.join(LOG_DIR, `${args.chain}-${dateStr}.log`);
@@ -204,7 +208,7 @@ function main() {
     const completed = s.ok.length + s.skip.length; // skip dihitung "selesai" karena memang gak ada balance
     const status =
       s.walletSkip ? 'WALLET_SKIPPED'
-      : completed >= TOTAL_TASKS ? 'DONE'
+      : completed >= totalTasks ? 'DONE'
       : s.fail.length === 0 ? 'IN_PROGRESS'
       : 'PARTIAL';
     return { addr, status, ok: s.ok.length, fail: s.fail.length, skip: s.skip.length, completed, failedTasks: s.fail.map((f) => f.task) };

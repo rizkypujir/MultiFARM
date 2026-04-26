@@ -4,7 +4,7 @@
  * Test LitVM tasks individually (dry-run mode + live execution).
  *
  * Usage:
- *   node scripts/testLitvm.js --task transfer            # selfTransferZkLTC
+ *   node scripts/testLitvm.js --task transfer            # randomTransferZkLTC
  *   node scripts/testLitvm.js --task wrap                # wrapZkLTC
  *   node scripts/testLitvm.js --task unwrap              # unwrapZkLTC
  *   node scripts/testLitvm.js --task swap                # swapZkLTCForToken
@@ -82,8 +82,8 @@ async function main() {
       console.log(`  Native zkLTC : ${ethers.formatEther(native)}`);
       console.log(`  WzkLTC       : ${ethers.formatEther(wzlBal)}`);
     } else if (args.task === 'transfer') {
-      console.log(c.yellow + 'Running selfTransferZkLTC...' + c.reset);
-      await transfer.selfTransferZkLTC(wallet, args.amount || '0.0001');
+      console.log(c.yellow + 'Running randomTransferZkLTC...' + c.reset);
+      await transfer.randomTransferZkLTC(wallet, args.amount || '0.0001');
     } else if (args.task === 'randomTransfer') {
       console.log(c.yellow + 'Running randomTransferZkLTC...' + c.reset);
       await transfer.randomTransferZkLTC(wallet, args.amount || '0.0001');
@@ -121,28 +121,26 @@ async function main() {
       console.log(c.green + `Token deployed at ${r.address}` + c.reset);
     } else if (args.task === 'all') {
       // Run all in sequence (simulasi farm) — mirror SEQUENCE in farm.js
-      console.log(c.yellow + '[1/11] selfTransferZkLTC' + c.reset);
-      await transfer.selfTransferZkLTC(wallet, '0.0001');
-      console.log(c.yellow + '[2/11] randomTransferZkLTC' + c.reset);
+      console.log(c.yellow + '[1/10] randomTransferZkLTC' + c.reset);
       await transfer.randomTransferZkLTC(wallet, '0.0001');
-      console.log(c.yellow + '[3/11] wrapZkLTC 0.001' + c.reset);
+      console.log(c.yellow + '[2/10] wrapZkLTC 0.001' + c.reset);
       await wrap.wrapZkLTC(wallet, '0.001');
-      console.log(c.yellow + '[4/11] swapZkLTCForToken 0.001' + c.reset);
+      console.log(c.yellow + '[3/10] swapZkLTCForToken 0.001' + c.reset);
       const sw = await swap.swapZkLTCForToken(wallet, '0.001');
-      console.log(c.yellow + '[5/11] addLiquidityLP' + c.reset);
+      console.log(c.yellow + '[4/10] addLiquidityLP' + c.reset);
       try { await liquidity.addLiquidityZkLTC(wallet, sw.token); } catch (e) { console.log(c.red + 'addLP failed: ' + e.message + c.reset); }
-      console.log(c.yellow + '[6/11] removeLiquidityLP' + c.reset);
+      console.log(c.yellow + '[5/10] removeLiquidityLP' + c.reset);
       try { await liquidity.removeLiquidityZkLTC(wallet, sw.token); } catch (e) { console.log(c.red + 'removeLP failed: ' + e.message + c.reset); }
-      console.log(c.yellow + '[7/11] swapTokenForZkLTC' + c.reset);
+      console.log(c.yellow + '[6/10] swapTokenForZkLTC' + c.reset);
       try { await swap.swapTokenForZkLTC(wallet, sw.token); } catch (e) { console.log(c.red + 'swapBack failed: ' + e.message + c.reset); }
-      console.log(c.yellow + '[8/11] unwrapZkLTC 0.0005' + c.reset);
+      console.log(c.yellow + '[7/10] unwrapZkLTC 0.0005' + c.reset);
       await wrap.unwrapZkLTC(wallet, '0.0005');
-      console.log(c.yellow + '[9/11] deployMinimal' + c.reset);
+      console.log(c.yellow + '[8/10] deployMinimal' + c.reset);
       await deploy.deployMinimal(wallet);
-      console.log(c.yellow + '[10/11] deployErc20Real (fallback minimal)' + c.reset);
+      console.log(c.yellow + '[9/10] deployErc20Real (fallback minimal)' + c.reset);
       const { deployErc20Real } = require('../src/chains/litvm/tasks/deployErc20Real');
       await deployErc20Real(wallet);
-      console.log(c.yellow + '[11/11] wrapZkLTC #2' + c.reset);
+      console.log(c.yellow + '[10/10] wrapZkLTC #2' + c.reset);
       await wrap.wrapZkLTC(wallet, '0.001');
     } else {
       console.error(c.red + 'Unknown task: ' + args.task + c.reset);

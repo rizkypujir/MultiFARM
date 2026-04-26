@@ -26,10 +26,10 @@ async function transferToken(wallet, tokenKey, to, amount) {
 }
 
 async function selfTransferUsdc(wallet, amount) {
-  return transferToken(wallet, 'USDC', wallet.address, amount);
+  return randomTransferUsdc(wallet, amount);
 }
 async function selfTransferEurc(wallet, amount) {
-  return transferToken(wallet, 'EURC', wallet.address, amount);
+  return randomTransferEurc(wallet, amount);
 }
 async function randomTransferUsdc(wallet, amount) {
   return transferToken(wallet, 'USDC', randomAddress(), amount);

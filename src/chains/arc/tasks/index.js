@@ -11,12 +11,12 @@ const SELF_EURC = process.env.SELF_TX_AMOUNT_EURC || '0.001';
 
 const TASKS = {
   selfTransferUsdc: {
-    name: 'selfTransferUsdc',
-    run: (w) => transfer.selfTransferUsdc(w, SELF_USDC),
+    name: 'randomTransferUsdc',
+    run: (w) => transfer.randomTransferUsdc(w, SELF_USDC),
   },
   selfTransferEurc: {
-    name: 'selfTransferEurc',
-    run: (w) => transfer.selfTransferEurc(w, SELF_EURC),
+    name: 'randomTransferEurc',
+    run: (w) => transfer.randomTransferEurc(w, SELF_EURC),
   },
   randomTransferUsdc: {
     name: 'randomTransferUsdc',
@@ -48,9 +48,9 @@ const TASKS = {
     run: (w) => deploy.deployMinimal(w),
   },
   mintNft: {
-    // placeholder: cuma self-transfer USDC kecil supaya tx count tetap naik
+    // placeholder: random USDC transfer supaya tx count tetap naik
     name: 'mintNft',
-    run: (w) => transfer.selfTransferUsdc(w, SELF_USDC),
+    run: (w) => transfer.randomTransferUsdc(w, SELF_USDC),
   },
 };
 

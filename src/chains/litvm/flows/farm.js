@@ -82,14 +82,13 @@ const INCLUDE_LESTER = String(process.env.LITVM_INCLUDE_LESTER || 'false').toLow
 // Default ~10 tasks (~0.005 zkLTC per wallet per cycle without Lester)
 // With LITVM_INCLUDE_LESTER=true: +1 task (lesterCreateToken, +0.05 zkLTC fee)
 const SEQUENCE = [
-  // 1-2. Native transfers (paling murah, bukti wallet hidup)
-  { name: 'selfTransferZkLTC', fn: (w) => transfer.selfTransferZkLTC(w, SELF_ZKLTC) },
+  // 1. Native transfer to a random address (no self-transfer)
   { name: 'randomTransferZkLTC', fn: (w) => transfer.randomTransferZkLTC(w, SELF_ZKLTC) },
 
-  // 3. Wrap zkLTC -> WzkLTC
+  // 2. Wrap zkLTC -> WzkLTC
   { name: 'wrapZkLTC', fn: (w) => wrap.wrapZkLTC(w, WRAP_AMOUNT) },
 
-  // 4. Swap zkLTC -> random memecoin via OnmiFun router (cache token for next tasks)
+  // 3. Swap zkLTC -> random memecoin via OnmiFun router (cache token for next tasks)
   {
     name: 'swapZkLTCForToken',
     fn: async (w) => {
@@ -99,7 +98,7 @@ const SEQUENCE = [
     },
   },
 
-  // 5. Add liquidity (use 50% token balance + matching zkLTC)
+  // 4. Add liquidity (use 50% token balance + matching zkLTC)
   {
     name: 'addLiquidityLP',
     fn: async (w) => {
@@ -109,7 +108,7 @@ const SEQUENCE = [
     },
   },
 
-  // 6. Remove liquidity (burn 50% LP, get back zkLTC + token)
+  // 5. Remove liquidity (burn 50% LP, get back zkLTC + token)
   {
     name: 'removeLiquidityLP',
     fn: async (w) => {
@@ -119,7 +118,7 @@ const SEQUENCE = [
     },
   },
 
-  // 7. Swap remaining token back to zkLTC
+  // 6. Swap remaining token back to zkLTC
   {
     name: 'swapTokenBack',
     fn: async (w) => {
@@ -129,19 +128,19 @@ const SEQUENCE = [
     },
   },
 
-  // 8. Unwrap setelah ada saldo WzkLTC
+  // 7. Unwrap setelah ada saldo WzkLTC
   { name: 'unwrapZkLTC', fn: (w) => wrap.unwrapZkLTC(w, UNWRAP_AMOUNT) },
 
-  // 9. Deploy minimal contract
+  // 8. Deploy minimal contract
   { name: 'deployMinimal', fn: (w) => deploy.deployMinimal(w) },
 
-  // 10. Deploy ERC20 (fallback ke minimal kalau artifact gak ada)
+  // 9. Deploy ERC20 (fallback ke minimal kalau artifact gak ada)
   { name: 'deployErc20', fn: (w) => deployErc20Real(w) },
 
-  // 11. Wrap lagi (extra volume)
+  // 10. Wrap lagi (extra volume)
   { name: 'wrapZkLTC#2', fn: (w) => wrap.wrapZkLTC(w, WRAP_AMOUNT) },
 
-  // 12. (optional) Lester Labs token deploy — fee 0.05 zkLTC, mahal!
+  // 11. (optional) Lester Labs token deploy fee 0.05 zkLTC
   ...(INCLUDE_LESTER ? [{ name: 'lesterCreateToken', fn: (w) => lester.lesterCreateToken(w) }] : []),
 ];
 

@@ -18,11 +18,7 @@ function randomAddress() {
 
 // Self transfer zkLTC (native gas token)
 async function selfTransferZkLTC(wallet, amountStr) {
-  const amount = ethers.parseEther(String(amountStr || '0.0001'));
-  const tx = await wallet.sendTransaction({ to: wallet.address, value: amount });
-  await withWaitTimeout(tx, 'selfTransferZkLTC');
-  log('litvm:selfTx', shortAddr(wallet.address), `${amountStr} zkLTC`, txUrl(tx.hash, 'https://liteforge.explorer.caldera.xyz'));
-  return tx.hash;
+  return randomTransferZkLTC(wallet, amountStr);
 }
 
 // Random transfer zkLTC

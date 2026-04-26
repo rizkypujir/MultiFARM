@@ -57,19 +57,16 @@ const COUNTER_PER_CYCLE = Number(process.env.COUNTER_PER_CYCLE || 3);
 const MIN_USDC_FARM = process.env.MIN_USDC_FARM || '0.05';
 // Jumlah wallet yang jalan bareng dalam 1 batch. Default 3 — aman untuk RPC publik (drpc).
 // Naikin ke 5-10 kalau pakai RPC private (Alchemy/QuickNode) dengan rate limit tinggi.
-// Note: tiap wallet jalanin 14 task, jadi batch=3 = 3 tx concurrent ke RPC saja, bukan 14×3.
+// Note: tiap wallet jalanin task sequential, jadi batch=3 = 3 tx concurrent ke RPC saja.
 const BATCH_SIZE = Number(process.env.BATCH_SIZE || 3);
 // Deadline per wallet (ms). Kalau 1 wallet jalan lebih dari ini, sisa task di-skip.
 // Mencegah wallet "stuck nonce" nahan slot pool. Default 10 menit.
 const WALLET_DEADLINE_MS = Number(process.env.WALLET_DEADLINE_MS || 600000);
 
-// Urutan task penuh (sequential per wallet)
+// Urutan task waras (sequential per wallet): no self-transfer, fewer deploy-heavy calls.
 const SEQUENCE = [
-  // Token transfers. Arc RPC is more reliable with non-self token transfers.
-  { name: 'randomTransferUsdc#1', fn: (w) => transfer.randomTransferUsdc(w, SELF_USDC) },
-  { name: 'randomTransferEurc#1', fn: (w) => transfer.randomTransferEurc(w, SELF_EURC) },
-  { name: 'randomTransferUsdc#2', fn: (w) => transfer.randomTransferUsdc(w, SELF_USDC) },
-  { name: 'randomTransferEurc#2', fn: (w) => transfer.randomTransferEurc(w, SELF_EURC) },
+  { name: 'randomTransferUsdc', fn: (w) => transfer.randomTransferUsdc(w, SELF_USDC) },
+  { name: 'randomTransferEurc', fn: (w) => transfer.randomTransferEurc(w, SELF_EURC) },
   // Approve StableFX
   { name: 'approveUsdcFx', fn: (w) => approve.approveUsdcFx(w) },
   { name: 'approveEurcFx', fn: (w) => approve.approveEurcFx(w) },
@@ -77,10 +74,7 @@ const SEQUENCE = [
   { name: 'deployBasic', fn: (w) => deploy.deployMinimal(w) },
   { name: 'deployErc20', fn: (w) => deployErc20Real(w) },
   { name: 'deployNft+mint', fn: (w) => deployNftReal(w) },
-  // zkCodex tasks
-  { name: 'zkDeploySimple', fn: (w) => zk.zkDeploySimple(w) },
-  { name: 'zkDeployToken', fn: (w) => zk.zkDeployToken(w) },
-  { name: 'zkDeployNft', fn: (w) => zk.zkDeployNft(w) },
+  // zkCodex lightweight tasks
   { name: 'zkGm', fn: (w) => zk.zkGm(w) },
   { name: `zkCounter×${COUNTER_PER_CYCLE}`, fn: (w) => zk.zkCounterMany(w, COUNTER_PER_CYCLE) },
 ];
@@ -131,7 +125,7 @@ async function runWallet(wallet, onTask) {
   if (!hasEurc) {
     logFile('wallet:eurc', `${wallet.address} EURC=${ethers.formatUnits(eurcBal, 6)} -> EURC tasks akan di-skip`);
   }
-  const eurcRequiredTasks = new Set(['randomTransferEurc#1', 'randomTransferEurc#2']);
+  const eurcRequiredTasks = new Set(['randomTransferEurc']);
 
   let deadlineHit = false;
   for (let i = 0; i < SEQUENCE.length; i++) {
