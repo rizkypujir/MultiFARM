@@ -213,8 +213,8 @@ async function runFarmOnce(options = {}) {
   const total = wallets.length;
 
   const prev = loadProgress(total);
-  const doneSet = new Set(prev?.done || []);
   const results = prev?.results || [];
+  const doneSet = new Set(results.map((r) => String(r.addr || '').toLowerCase()).filter(Boolean));
   const cycleStart = prev?.startedAt || Date.now();
 
   const pending = wallets.filter((w) => !doneSet.has(w.address.toLowerCase()));
@@ -279,10 +279,6 @@ async function runFarmOnce(options = {}) {
       const i = nextIdx++;
       if (i >= pending.length) return;
       const w = pending[i];
-      const key = w.address.toLowerCase();
-
-      doneSet.add(key);
-      saveProgress({ startedAt: cycleStart, total, done: Array.from(doneSet), results });
 
       try {
         const r = await runWallet(w, onTask);
@@ -291,6 +287,7 @@ async function runFarmOnce(options = {}) {
         results.push({ addr: w.address, ok: 0, fail: SEQUENCE.length, secs: '0', error: e?.message });
         logFile('wallet:err', `${w.address} :: ${e?.message}`);
       } finally {
+        doneSet.add(w.address.toLowerCase());
         liveTasks.delete(w.address);
         completed++;
         renderSpinner();
