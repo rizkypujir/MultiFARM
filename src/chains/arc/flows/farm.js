@@ -59,6 +59,7 @@ const MIN_USDC_FARM = process.env.MIN_USDC_FARM || '0.05';
 // Naikin ke 5-10 kalau pakai RPC private (Alchemy/QuickNode) dengan rate limit tinggi.
 // Note: tiap wallet jalanin task sequential, jadi batch=3 = 3 tx concurrent ke RPC saja.
 const BATCH_SIZE = Number(process.env.BATCH_SIZE || 3);
+const ARC_TASK_RETRIES = Number(process.env.ARC_TASK_RETRIES || 0);
 // Deadline per wallet (ms). Kalau 1 wallet jalan lebih dari ini, sisa task di-skip.
 // Mencegah wallet "stuck nonce" nahan slot pool. Default 10 menit.
 const WALLET_DEADLINE_MS = Number(process.env.WALLET_DEADLINE_MS || 600000);
@@ -150,7 +151,11 @@ async function runWallet(wallet, onTask) {
     }
 
     try {
-      await withRetry(() => t.fn(wallet), { retries: 3, baseDelayMs: 3000, label: `${short}:${t.name}` });
+      await withRetry(() => t.fn(wallet), {
+        retries: ARC_TASK_RETRIES,
+        baseDelayMs: 3000,
+        label: `${short}:${t.name}`,
+      });
       ok++;
       logFile('task:ok', `${wallet.address} ${t.name}`);
     } catch (e) {
