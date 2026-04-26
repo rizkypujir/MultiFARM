@@ -65,11 +65,11 @@ const WALLET_DEADLINE_MS = Number(process.env.WALLET_DEADLINE_MS || 600000);
 
 // Urutan task penuh (sequential per wallet)
 const SEQUENCE = [
-  // Native token transfers
-  { name: 'selfTransferUsdc', fn: (w) => transfer.selfTransferUsdc(w, SELF_USDC) },
-  { name: 'selfTransferEurc', fn: (w) => transfer.selfTransferEurc(w, SELF_EURC) },
-  { name: 'randomTransferUsdc', fn: (w) => transfer.randomTransferUsdc(w, SELF_USDC) },
-  { name: 'randomTransferEurc', fn: (w) => transfer.randomTransferEurc(w, SELF_EURC) },
+  // Token transfers. Arc RPC is more reliable with non-self token transfers.
+  { name: 'randomTransferUsdc#1', fn: (w) => transfer.randomTransferUsdc(w, SELF_USDC) },
+  { name: 'randomTransferEurc#1', fn: (w) => transfer.randomTransferEurc(w, SELF_EURC) },
+  { name: 'randomTransferUsdc#2', fn: (w) => transfer.randomTransferUsdc(w, SELF_USDC) },
+  { name: 'randomTransferEurc#2', fn: (w) => transfer.randomTransferEurc(w, SELF_EURC) },
   // Approve StableFX
   { name: 'approveUsdcFx', fn: (w) => approve.approveUsdcFx(w) },
   { name: 'approveEurcFx', fn: (w) => approve.approveEurcFx(w) },
@@ -131,7 +131,7 @@ async function runWallet(wallet, onTask) {
   if (!hasEurc) {
     logFile('wallet:eurc', `${wallet.address} EURC=${ethers.formatUnits(eurcBal, 6)} -> EURC tasks akan di-skip`);
   }
-  const eurcRequiredTasks = new Set(['selfTransferEurc', 'randomTransferEurc']);
+  const eurcRequiredTasks = new Set(['randomTransferEurc#1', 'randomTransferEurc#2']);
 
   let deadlineHit = false;
   for (let i = 0; i < SEQUENCE.length; i++) {
