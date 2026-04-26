@@ -2,7 +2,8 @@
 const { ethers } = require('ethers');
 const { loadArtifact, hasArtifact } = require('../../../shared/artifacts');
 const { deployMinimal } = require('./deploy');
-const { shortAddr, txUrl, log, randomName } = require('../../../shared/utils');
+const { shortAddr, log, randomName } = require('../../../shared/utils');
+const { waitForArcTx } = require('./waitTx');
 
 async function deployErc20Real(wallet) {
   if (!hasArtifact('SimpleERC20')) {
@@ -19,12 +20,12 @@ async function deployErc20Real(wallet) {
 
   const contract = await factory.deploy(name, symbol, decimals, supply);
   const deployTx = contract.deploymentTransaction();
-  await contract.waitForDeployment();
   const addr = await contract.getAddress();
-  log(
-    'tx:deployErc20',
-    `${shortAddr(wallet.address)} deploy ${symbol} (${name}) -> ${shortAddr(addr)}  ${txUrl(deployTx.hash)}`
-  );
+  await waitForArcTx(wallet, deployTx, {
+    tag: 'tx:deployErc20',
+    sent: `${shortAddr(wallet.address)} deploy ${symbol} (${name})`,
+    confirmed: `${shortAddr(wallet.address)} deploy ${symbol} (${name}) -> ${shortAddr(addr)}`,
+  });
   return { contract, address: addr, hash: deployTx.hash };
 }
 

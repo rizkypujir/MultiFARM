@@ -2,7 +2,8 @@
 const { ethers } = require('ethers');
 const chain = require('../config');
 const erc20Abi = require('../../../shared/abi/erc20');
-const { shortAddr, txUrl, log, randInt } = require('../../../shared/utils');
+const { shortAddr, randInt } = require('../../../shared/utils');
+const { waitForArcTx } = require('./waitTx');
 
 async function approveToken(wallet, tokenKey, spender, amount) {
   const token = chain.tokens[tokenKey];
@@ -11,16 +12,16 @@ async function approveToken(wallet, tokenKey, spender, amount) {
     ? ethers.MaxUint256
     : ethers.parseUnits(String(amount), token.decimals);
   const tx = await c.approve(spender, value);
-  const rcpt = await tx.wait(1, Number(process.env.TX_TIMEOUT_MS || 90000));
-  log(
-    `tx:approve`,
-    `${shortAddr(wallet.address)} approve ${token.symbol} spender=${shortAddr(spender)}  ${txUrl(tx.hash)}`
-  );
-  return rcpt;
+  const detail = `${shortAddr(wallet.address)} approve ${token.symbol} spender=${shortAddr(spender)}`;
+  return waitForArcTx(wallet, tx, {
+    tag: 'tx:approve',
+    sent: detail,
+    confirmed: detail,
+  });
 }
 
 async function approveUsdcFx(wallet) {
-  const amt = (randInt(1, 50) / 10).toFixed(2); // 0.1 - 5.0
+  const amt = (randInt(1, 50) / 10).toFixed(2);
   return approveToken(wallet, 'USDC', chain.contracts.stableFX, amt);
 }
 async function approveEurcFx(wallet) {

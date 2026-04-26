@@ -2,7 +2,8 @@
 const { ethers } = require('ethers');
 const { loadArtifact, hasArtifact } = require('../../../shared/artifacts');
 const { deployMinimal } = require('./deploy');
-const { shortAddr, txUrl, log, randomName } = require('../../../shared/utils');
+const { shortAddr, log, randomName } = require('../../../shared/utils');
+const { waitForArcTx } = require('./waitTx');
 
 async function deployNftReal(wallet) {
   if (!hasArtifact('SimpleNFT')) {
@@ -17,18 +18,21 @@ async function deployNftReal(wallet) {
 
   const contract = await factory.deploy(name, symbol);
   const deployTx = contract.deploymentTransaction();
-  await contract.waitForDeployment();
   const addr = await contract.getAddress();
-  log(
-    'tx:deployNft',
-    `${shortAddr(wallet.address)} deploy ${symbol} (${name}) -> ${shortAddr(addr)}  ${txUrl(deployTx.hash)}`
-  );
+  await waitForArcTx(wallet, deployTx, {
+    tag: 'tx:deployNft',
+    sent: `${shortAddr(wallet.address)} deploy ${symbol} (${name})`,
+    confirmed: `${shortAddr(wallet.address)} deploy ${symbol} (${name}) -> ${shortAddr(addr)}`,
+  });
 
   // mint 1 NFT ke wallet sendiri biar tx-nya lebih padat
   try {
     const mintTx = await contract.mint(wallet.address);
-    await mintTx.wait(1, Number(process.env.TX_TIMEOUT_MS || 90000));
-    log('tx:mintNft', `${shortAddr(wallet.address)} mint #1 on ${shortAddr(addr)}  ${txUrl(mintTx.hash)}`);
+    await waitForArcTx(wallet, mintTx, {
+      tag: 'tx:mintNft',
+      sent: `${shortAddr(wallet.address)} mint #1 on ${shortAddr(addr)}`,
+      confirmed: `${shortAddr(wallet.address)} mint #1 on ${shortAddr(addr)}`,
+    });
   } catch (e) {
     log('tx:mintNft', `mint ERR: ${e.message}`);
   }

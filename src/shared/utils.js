@@ -91,6 +91,7 @@ async function withRetry(fn, { retries = 3, baseDelayMs = 2000, label = 'op', ti
       return await withTimeout(Promise.resolve().then(fn), taskTimeout, label);
     } catch (e) {
       lastErr = e;
+      if (e?.noRetry) throw e;
       const isTimeout = /timeout after \d+ms/.test(e?.message || '');
       if (i === retries || (!isTransient(e) && !isTimeout)) throw e;
       const wait = baseDelayMs * Math.pow(2, i) + Math.floor(Math.random() * 1000);

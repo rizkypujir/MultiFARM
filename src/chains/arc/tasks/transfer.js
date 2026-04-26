@@ -2,26 +2,27 @@
 const { ethers } = require('ethers');
 const chain = require('../config');
 const erc20Abi = require('../../../shared/abi/erc20');
-const { shortAddr, txUrl, log } = require('../../../shared/utils');
+const { shortAddr } = require('../../../shared/utils');
+const { waitForArcTx } = require('./waitTx');
 
 function randomAddress() {
   return ethers.Wallet.createRandom().address;
 }
 
-const TX_TIMEOUT_MS = Number(process.env.TX_TIMEOUT_MS || 90000); // 90s default
+const TX_TIMEOUT_MS = Number(process.env.TX_TIMEOUT_MS || 90000);
 
 async function transferToken(wallet, tokenKey, to, amount) {
   const token = chain.tokens[tokenKey];
   const c = new ethers.Contract(token.address, erc20Abi, wallet);
   const value = ethers.parseUnits(String(amount), token.decimals);
   const tx = await c.transfer(to, value);
-  // wait(confirms, timeoutMs) — ethers v6: throw kalau tx gak confirmed dalam timeoutMs
-  const rcpt = await tx.wait(1, TX_TIMEOUT_MS);
-  log(
-    `tx:${tokenKey}`,
-    `${shortAddr(wallet.address)} -> ${shortAddr(to)}  ${amount} ${token.symbol}  ${txUrl(tx.hash)}  block=${rcpt.blockNumber}`
-  );
-  return rcpt;
+  const detail = `${shortAddr(wallet.address)} -> ${shortAddr(to)}  ${amount} ${token.symbol}`;
+  return waitForArcTx(wallet, tx, {
+    timeoutMs: TX_TIMEOUT_MS,
+    tag: `tx:${tokenKey}`,
+    sent: detail,
+    confirmed: detail,
+  });
 }
 
 async function selfTransferUsdc(wallet, amount) {

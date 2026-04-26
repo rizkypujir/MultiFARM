@@ -1,6 +1,7 @@
 'use strict';
 const { ethers } = require('ethers');
-const { shortAddr, txUrl, log } = require('../../../shared/utils');
+const { shortAddr } = require('../../../shared/utils');
+const { waitForArcTx } = require('./waitTx');
 
 // ===== zkCodex Arc Testnet contracts =====
 // Sumber: https://zkcodex.com/onchain/
@@ -17,12 +18,12 @@ const FEE_COUNTER = ethers.parseEther('0.01'); // 0.01 USDC per increment
 // ===== Helpers =====
 async function sendRaw(wallet, { to, data, value = 0n, label }) {
   const tx = await wallet.sendTransaction({ to, data, value });
-  const rcpt = await tx.wait(1, Number(process.env.TX_TIMEOUT_MS || 90000));
-  log(
-    `tx:${label}`,
-    `${shortAddr(wallet.address)} -> ${shortAddr(to)}  ${txUrl(tx.hash)}  block=${rcpt.blockNumber}`
-  );
-  return rcpt;
+  const detail = `${shortAddr(wallet.address)} -> ${shortAddr(to)}`;
+  return waitForArcTx(wallet, tx, {
+    tag: `tx:${label}`,
+    sent: detail,
+    confirmed: detail,
+  });
 }
 
 // ===== Raw hex data dari capture tx zkCodex (persis match kontrak) =====
