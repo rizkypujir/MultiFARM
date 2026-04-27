@@ -1,16 +1,8 @@
 'use strict';
 const { ethers } = require('ethers');
 const { shortAddr, txUrl, log } = require('../../../shared/utils');
-
-const TX_TIMEOUT_MS = Number(process.env.TX_TIMEOUT_MS || 90000);
-
-function withWaitTimeout(tx, label = 'tx') {
-  let timer;
-  const timeout = new Promise((_, rej) => {
-    timer = setTimeout(() => rej(new Error(`${label} confirm timeout ${TX_TIMEOUT_MS}ms`)), TX_TIMEOUT_MS);
-  });
-  return Promise.race([tx.wait(), timeout]).finally(() => clearTimeout(timer));
-}
+const { litvmTxOverrides } = require('./fees');
+const { waitForLitvmTx } = require('./waitTx');
 
 function randomAddress() {
   return ethers.Wallet.createRandom().address;
@@ -25,8 +17,12 @@ async function selfTransferZkLTC(wallet, amountStr) {
 async function randomTransferZkLTC(wallet, amountStr) {
   const amount = ethers.parseEther(String(amountStr || '0.0001'));
   const to = randomAddress();
-  const tx = await wallet.sendTransaction({ to, value: amount });
-  await withWaitTimeout(tx, 'randomTransferZkLTC');
+  const tx = await wallet.sendTransaction({
+    to,
+    value: amount,
+    ...(await litvmTxOverrides(wallet.provider)),
+  });
+  await waitForLitvmTx(wallet, tx, { tag: 'litvm:randomTx' });
   log('litvm:randomTx', shortAddr(wallet.address), '->', shortAddr(to), `${amountStr} zkLTC`, txUrl(tx.hash, 'https://liteforge.explorer.caldera.xyz'));
   return tx.hash;
 }

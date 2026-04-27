@@ -3,24 +3,16 @@ const { ethers } = require('ethers');
 const { shortAddr, txUrl, log } = require('../../../shared/utils');
 const chain = require('../config');
 const wzkLtcAbi = require('../abi/wzkLtc');
-
-const TX_TIMEOUT_MS = Number(process.env.TX_TIMEOUT_MS || 90000);
+const { litvmTxOverrides } = require('./fees');
+const { waitForLitvmTx } = require('./waitTx');
 const EXPLORER = chain.explorer;
-
-function withWaitTimeout(tx, label = 'tx') {
-  let timer;
-  const timeout = new Promise((_, rej) => {
-    timer = setTimeout(() => rej(new Error(`${label} confirm timeout ${TX_TIMEOUT_MS}ms`)), TX_TIMEOUT_MS);
-  });
-  return Promise.race([tx.wait(), timeout]).finally(() => clearTimeout(timer));
-}
 
 // Wrap zkLTC -> WzkLTC (deposit)
 async function wrapZkLTC(wallet, amountStr) {
   const amount = ethers.parseEther(String(amountStr || '0.001'));
   const wzl = new ethers.Contract(chain.tokens.WzkLTC.address, wzkLtcAbi, wallet);
-  const tx = await wzl.deposit({ value: amount });
-  await withWaitTimeout(tx, 'wrapZkLTC');
+  const tx = await wzl.deposit(await litvmTxOverrides(wallet.provider, { value: amount }));
+  await waitForLitvmTx(wallet, tx, { tag: 'litvm:wrap' });
   log('litvm:wrap', shortAddr(wallet.address), `${amountStr} zkLTC -> WzkLTC`, txUrl(tx.hash, EXPLORER));
   return tx.hash;
 }
@@ -36,8 +28,8 @@ async function unwrapZkLTC(wallet, amountStr) {
   let amount = ethers.parseEther(String(amountStr || '0.0005'));
   if (amount > balance) amount = balance;
 
-  const tx = await wzl.withdraw(amount);
-  await withWaitTimeout(tx, 'unwrapZkLTC');
+  const tx = await wzl.withdraw(amount, await litvmTxOverrides(wallet.provider));
+  await waitForLitvmTx(wallet, tx, { tag: 'litvm:unwrap' });
   log('litvm:unwrap', shortAddr(wallet.address), `${ethers.formatEther(amount)} WzkLTC -> zkLTC`, txUrl(tx.hash, EXPLORER));
   return tx.hash;
 }

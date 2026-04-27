@@ -10,6 +10,7 @@
     "balance": "node src/tasks/balance.js",
     "farm": "node src/runner.js",
     "arc:doctor": "node scripts/validateArc.js",
+    "litvm:doctor": "node scripts/validateLitvm.js",
     "bridge": "node src/bridge/cctp.js",
     "compile": "hardhat compile",
     "deploy:erc20": "node src/tasks/deployErc20Real.js",

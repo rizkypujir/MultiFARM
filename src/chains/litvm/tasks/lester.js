@@ -2,17 +2,9 @@
 const { ethers } = require('ethers');
 const { shortAddr, txUrl, log, randomName } = require('../../../shared/utils');
 const chain = require('../config');
-
-const TX_TIMEOUT_MS = Number(process.env.TX_TIMEOUT_MS || 90000);
+const { litvmTxOverrides } = require('./fees');
+const { waitForLitvmTx } = require('./waitTx');
 const EXPLORER = chain.explorer;
-
-function withWaitTimeout(tx, label = 'tx') {
-  let timer;
-  const timeout = new Promise((_, rej) => {
-    timer = setTimeout(() => rej(new Error(`${label} confirm timeout ${TX_TIMEOUT_MS}ms`)), TX_TIMEOUT_MS);
-  });
-  return Promise.race([tx.wait(), timeout]).finally(() => clearTimeout(timer));
-}
 
 const TOKEN_FACTORY_ABI = [
   'function creationFee() view returns (uint256)',
@@ -51,8 +43,17 @@ async function lesterCreateToken(wallet) {
   const burnable = true;
   const pausable = false;
 
-  const tx = await factory.createToken(name, symbol, totalSupply, decimals, mintable, burnable, pausable, { value: fee });
-  const receipt = await withWaitTimeout(tx, 'lesterCreateToken');
+  const tx = await factory.createToken(
+    name,
+    symbol,
+    totalSupply,
+    decimals,
+    mintable,
+    burnable,
+    pausable,
+    await litvmTxOverrides(wallet.provider, { value: fee })
+  );
+  const receipt = await waitForLitvmTx(wallet, tx, { tag: 'litvm:lesterToken' });
 
   // Try parse event untuk dapat alamat token (best-effort, tidak fatal kalau gagal)
   let tokenAddr = null;

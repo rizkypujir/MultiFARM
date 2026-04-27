@@ -5,19 +5,11 @@ const chain = require('../config');
 const routerAbi = require('../abi/router');
 const factoryAbi = require('../abi/factory');
 const pairAbi = require('../abi/pair');
-
-const TX_TIMEOUT_MS = Number(process.env.TX_TIMEOUT_MS || 90000);
+const { litvmTxOverrides } = require('./fees');
+const { waitForLitvmTx } = require('./waitTx');
 const EXPLORER = chain.explorer;
 const SLIPPAGE_BPS = Number(process.env.LITVM_SLIPPAGE_BPS || 500); // 5% default
 const DEADLINE_SECS = 600;
-
-function withWaitTimeout(tx, label = 'tx') {
-  let timer;
-  const timeout = new Promise((_, rej) => {
-    timer = setTimeout(() => rej(new Error(`${label} confirm timeout ${TX_TIMEOUT_MS}ms`)), TX_TIMEOUT_MS);
-  });
-  return Promise.race([tx.wait(), timeout]).finally(() => clearTimeout(timer));
-}
 
 const ERC20_ABI = [
   'function balanceOf(address) view returns (uint256)',
@@ -75,8 +67,12 @@ async function addLiquidityZkLTC(wallet, tokenAddr) {
   // Approve router untuk spend token (kalau allowance kurang)
   const allowance = await token.allowance(wallet.address, chain.contracts.onmiFun.router);
   if (allowance < amountTokenDesired) {
-    const approveTx = await token.approve(chain.contracts.onmiFun.router, ethers.MaxUint256);
-    await withWaitTimeout(approveTx, 'approve');
+    const approveTx = await token.approve(
+      chain.contracts.onmiFun.router,
+      ethers.MaxUint256,
+      await litvmTxOverrides(wallet.provider)
+    );
+    await waitForLitvmTx(wallet, approveTx, { tag: 'litvm:approveLPToken' });
   }
 
   // Slippage tolerance
@@ -91,9 +87,9 @@ async function addLiquidityZkLTC(wallet, tokenAddr) {
     amountETHMin,
     wallet.address,
     deadline,
-    { value: amountETH }
+    await litvmTxOverrides(wallet.provider, { value: amountETH })
   );
-  await withWaitTimeout(tx, 'addLiquidityETH');
+  await waitForLitvmTx(wallet, tx, { tag: 'litvm:addLP' });
 
   const sym = await token.symbol().catch(() => '?');
   log(
@@ -129,8 +125,12 @@ async function removeLiquidityZkLTC(wallet, tokenAddr) {
   // Approve router for LP token
   const allowance = await pair.allowance(wallet.address, chain.contracts.onmiFun.router);
   if (allowance < liquidity) {
-    const approveTx = await pair.approve(chain.contracts.onmiFun.router, ethers.MaxUint256);
-    await withWaitTimeout(approveTx, 'approveLP');
+    const approveTx = await pair.approve(
+      chain.contracts.onmiFun.router,
+      ethers.MaxUint256,
+      await litvmTxOverrides(wallet.provider)
+    );
+    await waitForLitvmTx(wallet, approveTx, { tag: 'litvm:approveLP' });
   }
 
   const deadline = Math.floor(Date.now() / 1000) + DEADLINE_SECS;
@@ -141,9 +141,10 @@ async function removeLiquidityZkLTC(wallet, tokenAddr) {
     0,
     0,
     wallet.address,
-    deadline
+    deadline,
+    await litvmTxOverrides(wallet.provider)
   );
-  await withWaitTimeout(tx, 'removeLiquidityETH');
+  await waitForLitvmTx(wallet, tx, { tag: 'litvm:removeLP' });
 
   const tokenC = new ethers.Contract(tokenAddr, ERC20_ABI, wallet.provider);
   const sym = await tokenC.symbol().catch(() => '?');

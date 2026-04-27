@@ -5,10 +5,8 @@ const chain = require('./config');
 let _provider;
 function getProvider() {
   if (!_provider) {
-    _provider = new ethers.JsonRpcProvider(chain.rpcUrl, {
-      name: chain.name,
-      chainId: chain.chainId,
-    });
+    const network = ethers.Network.from(chain.chainId);
+    _provider = new ethers.JsonRpcProvider(chain.rpcUrl, network, { staticNetwork: network });
   }
   return _provider;
 }

@@ -6,19 +6,11 @@ const routerAbi = require('../abi/router');
 const factoryAbi = require('../abi/factory');
 const pairAbi = require('../abi/pair');
 const wzkLtcAbi = require('../abi/wzkLtc');
-
-const TX_TIMEOUT_MS = Number(process.env.TX_TIMEOUT_MS || 90000);
+const { litvmTxOverrides } = require('./fees');
+const { waitForLitvmTx } = require('./waitTx');
 const EXPLORER = chain.explorer;
 const SLIPPAGE_BPS = Number(process.env.LITVM_SLIPPAGE_BPS || 500); // 5% default
 const DEADLINE_SECS = 600; // 10 minutes
-
-function withWaitTimeout(tx, label = 'tx') {
-  let timer;
-  const timeout = new Promise((_, rej) => {
-    timer = setTimeout(() => rej(new Error(`${label} confirm timeout ${TX_TIMEOUT_MS}ms`)), TX_TIMEOUT_MS);
-  });
-  return Promise.race([tx.wait(), timeout]).finally(() => clearTimeout(timer));
-}
 
 // Cache: pair list, token list. Refresh sekali per session.
 let _cachedPairs = null;
@@ -84,9 +76,9 @@ async function swapZkLTCForToken(wallet, amountStr) {
     path,
     wallet.address,
     deadline,
-    { value: amount }
+    await litvmTxOverrides(wallet.provider, { value: amount })
   );
-  await withWaitTimeout(tx, 'swapZkLTCForToken');
+  await waitForLitvmTx(wallet, tx, { tag: 'litvm:swap' });
   log(
     'litvm:swap',
     shortAddr(wallet.address),
@@ -116,8 +108,12 @@ async function swapTokenForZkLTC(wallet, tokenAddr) {
   // Approve router (kalau allowance < balance)
   const allowance = await token.allowance(wallet.address, chain.contracts.onmiFun.router);
   if (allowance < balance) {
-    const approveTx = await token.approve(chain.contracts.onmiFun.router, ethers.MaxUint256);
-    await withWaitTimeout(approveTx, 'approve');
+    const approveTx = await token.approve(
+      chain.contracts.onmiFun.router,
+      ethers.MaxUint256,
+      await litvmTxOverrides(wallet.provider)
+    );
+    await waitForLitvmTx(wallet, approveTx, { tag: 'litvm:approve' });
   }
 
   const router = new ethers.Contract(chain.contracts.onmiFun.router, routerAbi, wallet);
@@ -137,9 +133,10 @@ async function swapTokenForZkLTC(wallet, tokenAddr) {
     minOut,
     path,
     wallet.address,
-    deadline
+    deadline,
+    await litvmTxOverrides(wallet.provider)
   );
-  await withWaitTimeout(tx, 'swapTokenForZkLTC');
+  await waitForLitvmTx(wallet, tx, { tag: 'litvm:swapBack' });
   const sym = await token.symbol().catch(() => '?');
   log(
     'litvm:swapBack',
