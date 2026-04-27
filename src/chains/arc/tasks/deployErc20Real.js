@@ -4,6 +4,7 @@ const { loadArtifact, hasArtifact } = require('../../../shared/artifacts');
 const { deployMinimal } = require('./deploy');
 const { shortAddr, log, randomName } = require('../../../shared/utils');
 const { waitForArcTx } = require('./waitTx');
+const { arcTxOverrides } = require('./fees');
 
 async function deployErc20Real(wallet) {
   if (!hasArtifact('SimpleERC20')) {
@@ -18,7 +19,7 @@ async function deployErc20Real(wallet) {
   const decimals = 18;
   const supply = ethers.parseUnits('1000000', 18);
 
-  const contract = await factory.deploy(name, symbol, decimals, supply);
+  const contract = await factory.deploy(name, symbol, decimals, supply, await arcTxOverrides(wallet.provider));
   const deployTx = contract.deploymentTransaction();
   const addr = await contract.getAddress();
   await waitForArcTx(wallet, deployTx, {

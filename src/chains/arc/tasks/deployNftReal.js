@@ -4,6 +4,7 @@ const { loadArtifact, hasArtifact } = require('../../../shared/artifacts');
 const { deployMinimal } = require('./deploy');
 const { shortAddr, log, randomName } = require('../../../shared/utils');
 const { waitForArcTx } = require('./waitTx');
+const { arcTxOverrides } = require('./fees');
 
 async function deployNftReal(wallet) {
   if (!hasArtifact('SimpleNFT')) {
@@ -16,7 +17,7 @@ async function deployNftReal(wallet) {
   const name = `FarmNFT${randomName('N')}`;
   const symbol = randomName('FN').slice(0, 6);
 
-  const contract = await factory.deploy(name, symbol);
+  const contract = await factory.deploy(name, symbol, await arcTxOverrides(wallet.provider));
   const deployTx = contract.deploymentTransaction();
   const addr = await contract.getAddress();
   await waitForArcTx(wallet, deployTx, {
@@ -27,7 +28,7 @@ async function deployNftReal(wallet) {
 
   // mint 1 NFT ke wallet sendiri biar tx-nya lebih padat
   try {
-    const mintTx = await contract.mint(wallet.address);
+    const mintTx = await contract.mint(wallet.address, await arcTxOverrides(wallet.provider));
     await waitForArcTx(wallet, mintTx, {
       tag: 'tx:mintNft',
       sent: `${shortAddr(wallet.address)} mint #1 on ${shortAddr(addr)}`,

@@ -4,6 +4,7 @@ const chain = require('../config');
 const erc20Abi = require('../../../shared/abi/erc20');
 const { shortAddr, randInt } = require('../../../shared/utils');
 const { waitForArcTx } = require('./waitTx');
+const { arcTxOverrides } = require('./fees');
 
 async function approveToken(wallet, tokenKey, spender, amount) {
   const token = chain.tokens[tokenKey];
@@ -11,7 +12,7 @@ async function approveToken(wallet, tokenKey, spender, amount) {
   const value = amount === 'max'
     ? ethers.MaxUint256
     : ethers.parseUnits(String(amount), token.decimals);
-  const tx = await c.approve(spender, value);
+  const tx = await c.approve(spender, value, await arcTxOverrides(wallet.provider));
   const detail = `${shortAddr(wallet.address)} approve ${token.symbol} spender=${shortAddr(spender)}`;
   return waitForArcTx(wallet, tx, {
     tag: 'tx:approve',

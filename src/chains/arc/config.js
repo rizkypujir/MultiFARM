@@ -4,7 +4,13 @@ require('dotenv').config();
 module.exports = {
   name: 'Arc Testnet',
   chainId: Number(process.env.CHAIN_ID || 5042002),
-  rpcUrl: process.env.RPC_URL || 'https://arc-testnet.drpc.org',
+  rpcUrls: (process.env.RPC_URLS || process.env.RPC_URL || 'https://rpc.testnet.arc.network')
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean),
+  get rpcUrl() {
+    return this.rpcUrls[0];
+  },
   explorer: process.env.EXPLORER || 'https://testnet.arcscan.app',
   tokens: {
     // USDC adalah native gas token Arc

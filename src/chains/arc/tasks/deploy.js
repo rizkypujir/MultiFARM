@@ -2,13 +2,17 @@
 const { ethers } = require('ethers');
 const { shortAddr } = require('../../../shared/utils');
 const { waitForArcTx } = require('./waitTx');
+const { arcTxOverrides } = require('./fees');
 
 const MINIMAL_INIT_CODE = '0x6001600c60003960016000f300';
 
 async function deployMinimal(wallet) {
   const nonce = ethers.hexlify(ethers.randomBytes(4)).slice(2);
   const data = MINIMAL_INIT_CODE + nonce;
-  const tx = await wallet.sendTransaction({ data });
+  const tx = await wallet.sendTransaction({
+    data,
+    ...(await arcTxOverrides(wallet.provider)),
+  });
   return waitForArcTx(wallet, tx, {
     tag: 'tx:deploy',
     sent: `${shortAddr(wallet.address)} deploying minimal`,

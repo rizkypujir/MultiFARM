@@ -4,6 +4,7 @@ const chain = require('../config');
 const erc20Abi = require('../../../shared/abi/erc20');
 const { shortAddr } = require('../../../shared/utils');
 const { waitForArcTx } = require('./waitTx');
+const { arcTxOverrides } = require('./fees');
 
 function randomAddress() {
   return ethers.Wallet.createRandom().address;
@@ -15,7 +16,7 @@ async function transferToken(wallet, tokenKey, to, amount) {
   const token = chain.tokens[tokenKey];
   const c = new ethers.Contract(token.address, erc20Abi, wallet);
   const value = ethers.parseUnits(String(amount), token.decimals);
-  const tx = await c.transfer(to, value);
+  const tx = await c.transfer(to, value, await arcTxOverrides(wallet.provider));
   const detail = `${shortAddr(wallet.address)} -> ${shortAddr(to)}  ${amount} ${token.symbol}`;
   return waitForArcTx(wallet, tx, {
     timeoutMs: TX_TIMEOUT_MS,

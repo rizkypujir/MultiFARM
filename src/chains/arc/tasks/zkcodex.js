@@ -2,6 +2,7 @@
 const { ethers } = require('ethers');
 const { shortAddr } = require('../../../shared/utils');
 const { waitForArcTx } = require('./waitTx');
+const { arcTxOverrides } = require('./fees');
 
 // ===== zkCodex Arc Testnet contracts =====
 // Sumber: https://zkcodex.com/onchain/
@@ -17,7 +18,12 @@ const FEE_COUNTER = ethers.parseEther('0.01'); // 0.01 USDC per increment
 
 // ===== Helpers =====
 async function sendRaw(wallet, { to, data, value = 0n, label }) {
-  const tx = await wallet.sendTransaction({ to, data, value });
+  const tx = await wallet.sendTransaction({
+    to,
+    data,
+    value,
+    ...(await arcTxOverrides(wallet.provider)),
+  });
   const detail = `${shortAddr(wallet.address)} -> ${shortAddr(to)}`;
   return waitForArcTx(wallet, tx, {
     tag: `tx:${label}`,
