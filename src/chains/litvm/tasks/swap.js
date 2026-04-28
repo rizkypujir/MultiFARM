@@ -10,6 +10,8 @@ const { litvmTxOverrides } = require('./fees');
 const { waitForLitvmTx } = require('./waitTx');
 const EXPLORER = chain.explorer;
 const SLIPPAGE_BPS = Number(process.env.LITVM_SLIPPAGE_BPS || 500); // 5% default
+const SWAPBACK_SLIPPAGE_BPS = Number(process.env.LITVM_SWAPBACK_SLIPPAGE_BPS || 10000); // 10000 = minOut 0
+const SWAPBACK_BALANCE_BPS = Number(process.env.LITVM_SWAPBACK_BALANCE_BPS || 2500); // sell 25% token balance
 const DEADLINE_SECS = 600; // 10 minutes
 
 // Cache: pair list, token list. Refresh sekali per session.
@@ -120,13 +122,15 @@ async function swapTokenForZkLTC(wallet, tokenAddr) {
   const path = [tokenAddr, chain.tokens.WzkLTC.address];
   const deadline = Math.floor(Date.now() / 1000) + DEADLINE_SECS;
 
-  // Sell 50% of balance (jangan all in case ada error/lock)
-  const sellAmount = balance / 2n;
+  // Sell sebagian balance saja. Token random kadang tax/aneh, jadi jangan all-in.
+  const sellBps = BigInt(Math.max(1, Math.min(10000, SWAPBACK_BALANCE_BPS)));
+  const sellAmount = (balance * sellBps) / 10000n;
   if (sellAmount === 0n) throw new Error('balance too small to swap back');
 
   const amountsOut = await router.getAmountsOut(sellAmount, path);
   const expectedOut = amountsOut[1];
-  const minOut = (expectedOut * BigInt(10000 - SLIPPAGE_BPS)) / 10000n;
+  const swapBackSlippage = BigInt(Math.max(0, Math.min(10000, SWAPBACK_SLIPPAGE_BPS)));
+  const minOut = (expectedOut * (10000n - swapBackSlippage)) / 10000n;
 
   const tx = await router.swapExactTokensForETHSupportingFeeOnTransferTokens(
     sellAmount,

@@ -40,6 +40,45 @@ function saveProgress(p) {
 function clearProgress() {
   try { fs.unlinkSync(PROGRESS_FILE); } catch {}
 }
+
+function makeIssue(type, wallet, taskName, reason, extra = {}) {
+  return {
+    type,
+    wallet: wallet.address,
+    task: taskName || 'wallet',
+    reason: String(reason || '').slice(0, 220),
+    ...extra,
+  };
+}
+
+function formatIssue(issue) {
+  const mark = issue.type === 'fail' ? '❌' : '⚠️';
+  return `${mark} ${shortAddr(issue.wallet)} | ${issue.task} | ${issue.reason}`;
+}
+
+function escapeHtml(v) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function formatIssueHtml(issue) {
+  const mark = issue.type === 'fail' ? '❌' : '⚠️';
+  return `${mark} <code>${escapeHtml(shortAddr(issue.wallet))}</code> | <b>${escapeHtml(issue.task)}</b> | ${escapeHtml(issue.reason)}`;
+}
+
+function topIssues(results, limit = 8) {
+  return results.flatMap((r) => r.issues || []).slice(0, limit);
+}
+
+function formatSecs(secs) {
+  const n = Math.round(Number(secs) || 0);
+  const m = Math.floor(n / 60);
+  const s = n % 60;
+  return m > 0 ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`;
+}
+
 const transfer = require('../tasks/transfer');
 const approve = require('../tasks/approve');
 const deploy = require('../tasks/deploy');
@@ -60,6 +99,7 @@ const MIN_USDC_FARM = process.env.MIN_USDC_FARM || '0.05';
 // Note: tiap wallet jalanin task sequential, jadi batch=3 = 3 tx concurrent ke RPC saja.
 const BATCH_SIZE = Number(process.env.BATCH_SIZE || 3);
 const ARC_TASK_RETRIES = Number(process.env.ARC_TASK_RETRIES || 0);
+const ARC_ABORT_WALLET_ON_PENDING = String(process.env.ARC_ABORT_WALLET_ON_PENDING || 'true').toLowerCase() === 'true';
 // Deadline per wallet (ms). Kalau 1 wallet jalan lebih dari ini, sisa task di-skip.
 // Mencegah wallet "stuck nonce" nahan slot pool. Default 10 menit.
 const WALLET_DEADLINE_MS = Number(process.env.WALLET_DEADLINE_MS || 600000);
@@ -106,16 +146,50 @@ async function getEurcBalance(wallet) {
 
 // Parallel-safe: tidak sentuh spinner, tidak install silencer per-wallet.
 // Caller (runFarmOnce) yang install silencer sekali di awal cycle.
-async function runWallet(wallet, onTask) {
+async function runWallet(wallet, onTask, meta = {}) {
   const short = shortAddr(wallet.address);
   let ok = 0;
   let fail = 0;
+  let skip = 0;
+  const issues = [];
   const t0 = Date.now();
+  let currentTask = null;
+
+  const emit = (data) => {
+    if (!onTask) return;
+    onTask({
+      addr: wallet.address,
+      walletIndex: meta.walletIndex,
+      walletTotal: meta.walletTotal,
+      ok,
+      fail,
+      skip,
+      elapsedMs: Date.now() - t0,
+      ...(currentTask || {}),
+      ...data,
+    });
+  };
+
+  wallet.__farmProgress = (event) => {
+    emit({
+      event: event.type || 'tx',
+      txStatus: event.status,
+      txHash: event.hash,
+      txTag: event.tag,
+      txNonce: event.nonce,
+      txBlock: event.blockNumber,
+      txReason: event.reason,
+      txAt: event.at || Date.now(),
+    });
+  };
 
   const chk = await checkWalletFunded(wallet);
   if (!chk.funded) {
-    logFile('wallet:skip', `${wallet.address} skipped: USDC=${chk.balance} < ${MIN_USDC_FARM}`);
-    return { ok: 0, fail: 0, skipped: true, secs: '0.0', addr: wallet.address, balance: chk.balance };
+    const reason = `USDC=${chk.balance} < ${MIN_USDC_FARM}`;
+    logFile('wallet:skip', `${wallet.address} skipped: ${reason}`);
+    issues.push(makeIssue('skip', wallet, 'wallet', reason));
+    delete wallet.__farmProgress;
+    return { ok: 0, fail: 0, skip: SEQUENCE.length, issues, skipped: true, secs: '0.0', addr: wallet.address, balance: chk.balance };
   }
 
   // EURC preflight — kalau saldo EURC < 0.002 (butuh untuk 2 transfer 0.001 + buffer),
@@ -136,16 +210,29 @@ async function runWallet(wallet, onTask) {
     if (Date.now() - t0 > WALLET_DEADLINE_MS) {
       deadlineHit = true;
       const remaining = SEQUENCE.length - i;
+      const reason = `wallet deadline ${WALLET_DEADLINE_MS}ms, skipped ${remaining} remaining`;
       logFile('wallet:deadline', `${wallet.address} hit ${WALLET_DEADLINE_MS}ms deadline at task ${i + 1}/${SEQUENCE.length}, skipping ${remaining} remaining`);
-      fail += remaining;
+      skip += remaining;
+      issues.push(makeIssue('skip', wallet, t.name, reason));
       break;
     }
 
-    if (onTask) onTask({ addr: wallet.address, taskIdx: i + 1, taskTotal: SEQUENCE.length, taskName: t.name });
+    currentTask = {
+      taskIdx: i + 1,
+      taskTotal: SEQUENCE.length,
+      taskName: t.name,
+      taskStartedAt: Date.now(),
+      taskStatus: 'running',
+    };
+    emit({ event: 'task', taskStatus: 'running', txStatus: null, txHash: null });
 
     // Skip task yang butuh EURC kalau saldo kurang
     if (!hasEurc && eurcRequiredTasks.has(t.name)) {
+      const reason = `EURC=${ethers.formatUnits(eurcBal, 6)} < 0.002`;
+      skip++;
+      issues.push(makeIssue('skip', wallet, t.name, reason));
       logFile('task:skip', `${wallet.address} ${t.name} (no EURC balance)`);
+      emit({ event: 'task', taskStatus: 'skipped', txStatus: 'skipped', txReason: reason });
       if (i < SEQUENCE.length - 1) await randDelay(DELAY_MIN, DELAY_MAX);
       continue;
     }
@@ -158,19 +245,46 @@ async function runWallet(wallet, onTask) {
       });
       ok++;
       logFile('task:ok', `${wallet.address} ${t.name}`);
+      emit({ event: 'task', taskStatus: 'ok' });
     } catch (e) {
+      const msg = e.shortMessage || e.message || '';
+      if (t.name === 'zkGm' && /Wait before sending another GM/i.test(msg)) {
+        skip++;
+        issues.push(makeIssue('skip', wallet, t.name, 'cooldown: wait before sending another GM'));
+        logFile('task:skip', `${wallet.address} ${t.name} (cooldown)`);
+        emit({ event: 'task', taskStatus: 'skipped', txStatus: 'skipped', txReason: 'cooldown' });
+        if (i < SEQUENCE.length - 1) await randDelay(DELAY_MIN, DELAY_MAX);
+        continue;
+      }
       fail++;
-      logFile('task:fail', `${wallet.address} ${t.name} :: ${e.shortMessage || e.message}`);
+      issues.push(makeIssue('fail', wallet, t.name, msg, { txHash: e.txHash || null }));
+      logFile('task:fail', `${wallet.address} ${t.name} :: ${msg}`);
+      emit({ event: 'task', taskStatus: 'failed', txStatus: e.txHash ? 'failed' : null, txHash: e.txHash || null, txReason: msg });
+      if (ARC_ABORT_WALLET_ON_PENDING && e?.txHash && !e?.nonceCleared) {
+        const remaining = SEQUENCE.length - i - 1;
+        if (remaining > 0) {
+          skip += remaining;
+          issues.push(makeIssue('skip', wallet, 'remaining tasks', `pending tx nonce=${e.nonce ?? '?'}; skipped ${remaining} remaining`, { txHash: e.txHash }));
+          logFile(
+            'wallet:nonce-stuck',
+            `${wallet.address} pending tx ${e.txHash} nonce=${e.nonce ?? '?'}; skipping ${remaining} remaining tasks`
+          );
+        }
+        break;
+      }
     }
     if (i < SEQUENCE.length - 1) await randDelay(DELAY_MIN, DELAY_MAX);
   }
 
+  delete wallet.__farmProgress;
   const secs = ((Date.now() - t0) / 1000).toFixed(1);
-  return { ok, fail, secs, addr: wallet.address, deadlineHit };
+  return { ok, fail, skip, issues, secs, addr: wallet.address, deadlineHit };
 }
 
 async function runFarmOnce(options = {}) {
   const quiet = Boolean(options.quiet);
+  const telegramEnabled = options.telegram !== false && tg.isEnabled();
+  const notifyStart = String(process.env.TELEGRAM_NOTIFY_START || 'false').toLowerCase() === 'true';
   const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
   const emitProgress = (data) => {
     if (!onProgress) return;
@@ -189,7 +303,9 @@ async function runFarmOnce(options = {}) {
   const cycleStart = prev?.startedAt || Date.now();
 
   // Ambil daftar wallet yang belum diproses
-  const pending = wallets.filter((w) => !doneSet.has(w.address.toLowerCase()));
+  const pending = wallets
+    .map((wallet, index) => ({ wallet, index }))
+    .filter(({ wallet }) => !doneSet.has(wallet.address.toLowerCase()));
 
   emitProgress({ status: 'starting', current: 0, total: SEQUENCE.length, walletsDone: doneSet.size, walletsTotal: total });
 
@@ -203,10 +319,10 @@ async function runFarmOnce(options = {}) {
     console.log('');
   }
 
-  if (tg.isEnabled()) {
+  if (telegramEnabled && notifyStart) {
     const msg = prev && doneSet.size > 0
-      ? `♻️ <b>Arc Farm cycle resumed</b>\nDone: ${doneSet.size}/${total} | Remaining: ${pending.length} | Batch: ${BATCH_SIZE}`
-      : `🚀 <b>Arc Farm cycle started</b>\nWallets: ${total} | Tasks/wallet: ${SEQUENCE.length} | Batch: ${BATCH_SIZE}`;
+      ? `♻️ <b>Arc Farm Resumed</b>\n\n👛 Done: <b>${doneSet.size}/${total}</b>\n📦 Remaining: <b>${pending.length}</b>\n🧵 Batch: <b>${BATCH_SIZE}</b>`
+      : `🚀 <b>Arc Farm Started</b>\n\n👛 Wallets: <b>${total}</b>\n🧩 Tasks/wallet: <b>${SEQUENCE.length}</b>\n🧵 Batch: <b>${BATCH_SIZE}</b>\n⛽ RPC: <code>${chain.rpcUrl}</code>`;
     await tg.sendMessage(msg);
   }
 
@@ -224,13 +340,19 @@ async function runFarmOnce(options = {}) {
   const concurrency = Math.min(BATCH_SIZE, pending.length);
 
   const renderSpinner = () => {
-    const live = [...liveTasks.entries()]
-      .map(([addr, t]) => `${shortAddr(addr)}[${t.taskIdx}/${t.taskTotal}]`)
+    const active = [...liveTasks.entries()].map(([addr, t]) => ({ addr, ...t }));
+    const live = active
+      .map((t) => {
+        const tx = t.txHash ? ` ${t.txStatus || 'tx'}:${shortAddr(t.txHash)}` : '';
+        return `${shortAddr(t.addr)}[${t.taskIdx}/${t.taskTotal} ${t.taskName || '-'}${tx}]`;
+      })
       .join(' ');
-    const activeTasks = [...liveTasks.values()];
-    const current = activeTasks.length
-      ? Math.max(...activeTasks.map((t) => t.taskIdx))
+    const current = active.length
+      ? Math.max(...active.map((t) => t.taskIdx))
       : completed >= total ? SEQUENCE.length : 0;
+    const ok = results.reduce((a, r) => a + (r.ok || 0), 0);
+    const fail = results.reduce((a, r) => a + (r.fail || 0), 0);
+    const skip = results.reduce((a, r) => a + (r.skip || 0), 0);
     emitProgress({
       status: completed >= total ? 'done' : 'running',
       current,
@@ -238,6 +360,11 @@ async function runFarmOnce(options = {}) {
       walletsDone: completed,
       walletsTotal: total,
       activeWallets: liveTasks.size,
+      active,
+      ok,
+      fail,
+      skip,
+      elapsedMs: Date.now() - cycleStart,
     });
     if (spinner) {
       spinner.text = `[Arc] done=${completed}/${total}  pool=${liveTasks.size}/${concurrency}  active: ${live || '-'}`;
@@ -245,7 +372,8 @@ async function runFarmOnce(options = {}) {
   };
 
   const onTask = (info) => {
-    liveTasks.set(info.addr, info);
+    const prev = liveTasks.get(info.addr) || {};
+    liveTasks.set(info.addr, { ...prev, ...info });
     renderSpinner();
   };
 
@@ -254,14 +382,24 @@ async function runFarmOnce(options = {}) {
     while (true) {
       const i = nextIdx++;
       if (i >= pending.length) return;
-      const w = pending[i];
+      const item = pending[i];
+      const w = item.wallet;
 
       try {
-        const r = await runWallet(w, onTask);
+        const r = await runWallet(w, onTask, { walletIndex: item.index + 1, walletTotal: total });
         results.push(r);
       } catch (e) {
-        results.push({ addr: w.address, ok: 0, fail: SEQUENCE.length, secs: '0', error: e?.message });
-        logFile('wallet:err', `${w.address} :: ${e?.message}`);
+        const reason = e?.message || String(e);
+        results.push({
+          addr: w.address,
+          ok: 0,
+          fail: SEQUENCE.length,
+          skip: 0,
+          issues: [makeIssue('fail', w, 'wallet', reason)],
+          secs: '0',
+          error: reason,
+        });
+        logFile('wallet:err', `${w.address} :: ${reason}`);
       } finally {
         doneSet.add(w.address.toLowerCase());
         liveTasks.delete(w.address);
@@ -279,10 +417,12 @@ async function runFarmOnce(options = {}) {
 
   const totalOk = results.reduce((a, r) => a + r.ok, 0);
   const totalFail = results.reduce((a, r) => a + r.fail, 0);
-  const skipped = results.filter((r) => r.skipped).length;
-  const active = total - skipped;
+  const totalSkip = results.reduce((a, r) => a + (r.skip || 0), 0);
+  const skippedWallets = results.filter((r) => r.skipped).length;
+  const active = total - skippedWallets;
   const cycleSecs = ((Date.now() - cycleStart) / 1000).toFixed(1);
-  const fullyOk = results.filter((r) => !r.skipped && r.fail === 0).length;
+  const fullyOk = results.filter((r) => !r.skipped && r.fail === 0 && (r.skip || 0) === 0).length;
+  const issues = topIssues(results, 10);
 
   emitProgress({
     status: 'done',
@@ -293,12 +433,16 @@ async function runFarmOnce(options = {}) {
     activeWallets: 0,
     ok: totalOk,
     fail: totalFail,
+    skip: totalSkip,
+    active: [],
+    issues,
+    elapsedMs: Date.now() - cycleStart,
   });
 
   if (!quiet) {
     spinner.stopAndPersist({
-      symbol: totalFail === 0 ? chalk.green('✔') : chalk.yellow('!'),
-      text: `[Arc] cycle done  ${fullyOk}/${active} active wallets fully ok  |  skipped=${skipped}  ok=${totalOk} fail=${totalFail}  |  ${cycleSecs}s`,
+      symbol: totalFail === 0 && totalSkip === 0 ? chalk.green('✔') : chalk.yellow('!'),
+      text: `[Arc] cycle done  ${fullyOk}/${active} active wallets fully ok  |  walletSkip=${skippedWallets}  ok=${totalOk} skip=${totalSkip} fail=${totalFail}  |  ${cycleSecs}s`,
     });
 
     console.log('');
@@ -309,28 +453,36 @@ async function runFarmOnce(options = {}) {
         mark = chalk.gray('○');
         line = `  ${mark} ${idx}  ${shortAddr(r.addr)}  ${chalk.gray(`SKIPPED (USDC=${r.balance} < ${MIN_USDC_FARM})`)}`;
       } else {
-        mark = r.fail === 0 ? chalk.green('✔') : chalk.yellow('!');
-        line = `  ${mark} ${idx}  ${shortAddr(r.addr)}  ok=${r.ok} fail=${r.fail}  (${r.secs}s)`;
+        mark = r.fail === 0 && (r.skip || 0) === 0 ? chalk.green('✔') : chalk.yellow('!');
+        line = `  ${mark} ${idx}  ${shortAddr(r.addr)}  ok=${r.ok} skip=${r.skip || 0} fail=${r.fail}  (${r.secs}s)`;
       }
       console.log(line);
     });
+    if (issues.length) {
+      console.log(chalk.bold('  Skipped / Failed:'));
+      issues.forEach((issue) => console.log('  ' + formatIssue(issue)));
+    }
     console.log('');
   }
 
-  if (tg.isEnabled()) {
+  if (telegramEnabled) {
+    const issueLines = issues.length
+      ? '\n\n📋 <b>Skipped / Failed</b>\n' + issues.map(formatIssueHtml).join('\n')
+      : '';
     await tg.sendMessage(
-      `🏁 <b>Arc Farm cycle done</b>\n` +
-        `${fullyOk}/${active} active wallets fully ok\n` +
-        `Skipped (low balance): ${skipped}\n` +
-        `Total ok: ${totalOk} | fail: ${totalFail}\n` +
-        `Duration: ${cycleSecs}s`
+      `🏁 <b>Arc Farm Done</b>\n\n` +
+        `✅ Wallets OK: <b>${fullyOk}/${active}</b>\n` +
+        `👛 Wallet skipped: <b>${skippedWallets}</b>\n` +
+        `🧩 Tasks: ✅${totalOk} ⚠️${totalSkip} ❌${totalFail}\n` +
+        `⏱ Duration: <b>${formatSecs(cycleSecs)}</b>` +
+        issueLines
     );
   }
 
   // Cycle selesai — bersihin progress file supaya cycle berikutnya start fresh
   clearProgress();
 
-  return { totalOk, totalFail, fullyOk, total, cycleSecs };
+  return { totalOk, totalFail, totalSkip, fullyOk, total, skippedWallets, cycleSecs, issues };
 }
 
 module.exports = { runFarmOnce, SEQUENCE };

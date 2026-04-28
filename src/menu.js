@@ -11,7 +11,7 @@ const { runResume: runArcResume } = require('./chains/arc/flows/resume');
 const { runFarmOnce: runArcFarmOnce, SEQUENCE: arcFarmSequence } = require('./chains/arc/flows/farm');
 const { runFarmOnce: runLitvmFarmOnce, runBalance: runLitvmBalance, SEQUENCE: litvmFarmSequence } = require('./chains/litvm/flows/farm');
 const tg = require('./shared/telegram');
-const { sleep } = require('./shared/utils');
+const { sleep, shortAddr } = require('./shared/utils');
 
 // Chain registry — daftar chain yang tersedia
 const CHAINS = {
@@ -64,6 +64,26 @@ function shortChainName(target) {
   return target.chain.name.replace(/\s*Testnet\s*/i, '').trim();
 }
 
+function escapeHtml(v) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function formatSeconds(secs) {
+  const n = Math.round(Number(secs) || 0);
+  const m = Math.floor(n / 60);
+  const s = n % 60;
+  return m > 0 ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`;
+}
+
+function telegramBool(name, fallback = false) {
+  const raw = process.env[name];
+  if (raw == null || raw === '') return fallback;
+  return String(raw).toLowerCase() === 'true';
+}
+
 function createParallelDashboard(targets) {
   const states = new Map(
     targets.map((target) => [
@@ -72,36 +92,95 @@ function createParallelDashboard(targets) {
         label: shortChainName(target),
         current: 0,
         total: target.chain.taskTotal || '?',
+        walletsDone: 0,
+        walletsTotal: 0,
+        activeWallets: 0,
+        ok: 0,
+        skip: 0,
+        fail: 0,
+        active: [],
+        elapsedMs: 0,
         status: 'queued',
       },
     ])
   );
   let frame = 0;
-  let lastLen = 0;
+  let lastLines = 0;
   let timer = null;
+
+  const fmtDuration = (ms) => {
+    const secs = Math.floor((Number(ms) || 0) / 1000);
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return m > 0 ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`;
+  };
+
+  const fmtTx = (a) => {
+    if (a.txStatus === 'confirmed') return `confirmed ${a.txHash ? shortAddr(a.txHash) : ''}`.trim();
+    if (a.txStatus === 'sent') return `sent ${a.txHash ? shortAddr(a.txHash) : ''}`.trim();
+    if (a.txStatus === 'failed') return `failed ${a.txHash ? shortAddr(a.txHash) : ''}`.trim();
+    if (a.txStatus === 'skipped') return `skipped${a.txReason ? `: ${String(a.txReason).slice(0, 44)}` : ''}`;
+    if (a.txHash) return `${a.txStatus || 'tx'} ${shortAddr(a.txHash)}`;
+    return a.taskStatus || 'running';
+  };
 
   const render = (done = false) => {
     const spin = done ? '[done]' : DASHBOARD_FRAMES[frame++ % DASHBOARD_FRAMES.length];
-    const parts = [...states.values()].map((s) => {
+    const lines = [`${spin} MultiFARM live status`];
+
+    for (const s of states.values()) {
       const suffix = s.status === 'done' ? ' done' : '';
-      return `${s.label} ${s.current}/${s.total}${suffix}`;
-    });
-    const line = `${spin} ${parts.join('   ')}`;
-    process.stdout.write('\r' + line.padEnd(lastLen));
-    lastLen = Math.max(lastLen, line.length);
+      const walletTotal = s.walletsTotal || '?';
+      lines.push(
+        `${s.label.padEnd(6)} wallet ${String(s.walletsDone || 0).padStart(2)}/${walletTotal}  ` +
+          `task ${String(s.current || 0).padStart(2)}/${s.total}  ` +
+          `active ${s.activeWallets || 0}  ok=${s.ok || 0} skip=${s.skip || 0} fail=${s.fail || 0}  ${fmtDuration(s.elapsedMs)}${suffix}`
+      );
+
+      const active = Array.isArray(s.active) ? s.active.slice(0, 4) : [];
+      if (!active.length) {
+        lines.push('  - idle / waiting');
+      } else {
+        active.forEach((a) => {
+          lines.push(
+            `  - ${shortAddr(a.addr)}  wallet ${a.walletIndex || '?'}/${a.walletTotal || '?'}  ` +
+              `task ${a.taskIdx || '?'}/${a.taskTotal || s.total} ${a.taskName || '-'}  tx ${fmtTx(a)}`
+          );
+        });
+        if (s.active.length > active.length) {
+          lines.push(`  - +${s.active.length - active.length} wallet lainnya...`);
+        }
+      }
+    }
+
+    if (lastLines > 0) {
+      process.stdout.write(`\x1B[${lastLines}F\x1B[0J`);
+    }
+    process.stdout.write(lines.join('\n') + '\n');
+    lastLines = lines.length;
   };
 
   return {
     start() {
       render();
-      timer = setInterval(render, 180);
+      timer = setInterval(render, 750);
     },
     update(key, progress) {
       const state = states.get(key);
       if (!state) return;
-      state.current = progress.current ?? state.current;
-      state.total = progress.total ?? state.total;
-      state.status = progress.status || state.status;
+      Object.assign(state, {
+        current: progress.current ?? state.current,
+        total: progress.total ?? state.total,
+        walletsDone: progress.walletsDone ?? state.walletsDone,
+        walletsTotal: progress.walletsTotal ?? state.walletsTotal,
+        activeWallets: progress.activeWallets ?? state.activeWallets,
+        ok: progress.ok ?? state.ok,
+        skip: progress.skip ?? state.skip,
+        fail: progress.fail ?? state.fail,
+        active: progress.active ?? state.active,
+        elapsedMs: progress.elapsedMs ?? state.elapsedMs,
+        status: progress.status || state.status,
+      });
       render();
     },
     stop() {
@@ -305,6 +384,7 @@ async function menuDailyFarm() {
                 .then(() =>
                   t.chain.runFarmOnce({
                     quiet: true,
+                    telegram: false,
                     onProgress: (progress) => dashboard.update(t.key, progress),
                   })
                 )
@@ -319,17 +399,57 @@ async function menuDailyFarm() {
               return;
             }
             const fail = result.totalFail || 0;
-            const mark = fail === 0 ? chalk.green('OK') : chalk.yellow('WARN');
+            const skip = result.totalSkip || 0;
+            const skippedWallets = result.skippedWallets || 0;
+            const mark = fail === 0 && skip === 0 ? chalk.green('OK') : chalk.yellow('WARN');
             console.log(
-              `${mark} ${target.chain.name}: ok=${result.totalOk} fail=${fail} wallets=${result.fullyOk}/${result.total} duration=${result.cycleSecs}s`
+              `${mark} ${target.chain.name}: wallets=${result.fullyOk}/${result.total} walletSkip=${skippedWallets} ok=${result.totalOk} skip=${skip} fail=${fail} duration=${result.cycleSecs}s`
             );
+            if (Array.isArray(result.issues) && result.issues.length) {
+              result.issues.slice(0, 5).forEach((issue) => {
+                const markIssue = issue.type === 'fail' ? chalk.red('fail') : chalk.yellow('skip');
+                console.log(`  ${markIssue} ${shortAddr(issue.wallet)} ${issue.task}: ${issue.reason}`);
+              });
+            }
           });
+          if (tg.isEnabled()) {
+            const lines = ['🏁 <b>MultiFARM Cycle Done</b>', ''];
+            const issueLines = [];
+            for (const { target, result, error } of outcomes) {
+              if (error) {
+                lines.push(`❌ <b>${escapeHtml(target.chain.name)}</b>: ${escapeHtml(error.message)}`);
+                continue;
+              }
+              const fail = result.totalFail || 0;
+              const skip = result.totalSkip || 0;
+              const skippedWallets = result.skippedWallets || 0;
+              const mark = fail === 0 && skip === 0 ? '✅' : '⚠️';
+              lines.push(
+                `${mark} <b>${escapeHtml(target.chain.name)}</b>\n` +
+                  `👛 Wallets OK: <b>${result.fullyOk}/${result.total}</b> | skipped: <b>${skippedWallets}</b>\n` +
+                  `🧩 Tasks: ✅${result.totalOk || 0} ⚠️${skip} ❌${fail}\n` +
+                  `⏱ Duration: <b>${formatSeconds(result.cycleSecs)}</b>`
+              );
+              if (Array.isArray(result.issues)) {
+                result.issues.slice(0, 5).forEach((issue) => {
+                  const issueMark = issue.type === 'fail' ? '❌' : '⚠️';
+                  issueLines.push(
+                    `${issueMark} <code>${escapeHtml(shortAddr(issue.wallet))}</code> | <b>${escapeHtml(issue.task)}</b> | ${escapeHtml(issue.reason)}`
+                  );
+                });
+              }
+            }
+            if (issueLines.length) {
+              lines.push('', '📋 <b>Skipped / Failed</b>', ...issueLines.slice(0, 10));
+            }
+            await tg.sendMessage(lines.join('\n\n'));
+          }
         }
       } catch (e) {
         console.log(chalk.red('Cycle error: ' + e.message));
       }
       dailyState.nextAt = new Date(Date.now() + DAY_MS);
-      if (tg.isEnabled()) {
+      if (tg.isEnabled() && telegramBool('TELEGRAM_NOTIFY_NEXT', false)) {
         await tg.sendMessage(
           `⏳ Next cycle: ${dailyState.nextAt.toISOString().replace('T', ' ').slice(0, 16)} UTC`
         );

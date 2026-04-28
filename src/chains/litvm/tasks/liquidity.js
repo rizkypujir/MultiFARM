@@ -8,7 +8,8 @@ const pairAbi = require('../abi/pair');
 const { litvmTxOverrides } = require('./fees');
 const { waitForLitvmTx } = require('./waitTx');
 const EXPLORER = chain.explorer;
-const SLIPPAGE_BPS = Number(process.env.LITVM_SLIPPAGE_BPS || 500); // 5% default
+// LP di OnmiFun sering kena token tax / reserve berubah. Default 0 = permissive untuk testnet farming.
+const LP_MIN_BPS = Number(process.env.LITVM_LP_MIN_BPS || 0);
 const DEADLINE_SECS = 600;
 
 const ERC20_ABI = [
@@ -75,9 +76,9 @@ async function addLiquidityZkLTC(wallet, tokenAddr) {
     await waitForLitvmTx(wallet, approveTx, { tag: 'litvm:approveLPToken' });
   }
 
-  // Slippage tolerance
-  const amountTokenMin = (amountTokenDesired * BigInt(10000 - SLIPPAGE_BPS)) / 10000n;
-  const amountETHMin = (amountETH * BigInt(10000 - SLIPPAGE_BPS)) / 10000n;
+  // Slippage/min tolerance. Default 0 supaya token random/tax token tidak gampang revert.
+  const amountTokenMin = (amountTokenDesired * BigInt(Math.max(0, LP_MIN_BPS))) / 10000n;
+  const amountETHMin = (amountETH * BigInt(Math.max(0, LP_MIN_BPS))) / 10000n;
   const deadline = Math.floor(Date.now() / 1000) + DEADLINE_SECS;
 
   const tx = await router.addLiquidityETH(
